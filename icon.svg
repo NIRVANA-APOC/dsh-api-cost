@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="API cost">
+  <!-- Coin: the meter. The split fill is the peak / off-peak boundary. -->
+  <circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-opacity="0.55"/>
+  <path d="M12 2.8a9.2 9.2 0 0 1 0 18.4Z" fill="currentColor" fill-opacity="0.16"/>
+  <!-- ¥ glyph -->
+  <path d="M8.3 7.2 12 11.6l3.7-4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12 11.6V17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+  <path d="M9.2 13.1h5.6M9.2 15.1h5.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

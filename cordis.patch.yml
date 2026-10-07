@@ -1,0 +1,8 @@
+# dsh-api-cost — DeepSeek API cost meter with peak / off-peak rates.
+#
+# One Host row: it meters every model call and serves the pricing + ledger
+# snapshot the bundled Client widget renders. Install with plugin_manager
+# install_bundle (or `dsh plugin --profile web add dsh-api-cost`).
+- insert:
+    - id: dsh-api-cost
+      name: 'dsh-api-cost'

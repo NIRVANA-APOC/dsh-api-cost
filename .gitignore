@@ -1,0 +1,12 @@
+node_modules/
+npm-debug.log*
+*.log
+
+# Local scratch used while verifying a composed profile
+.verify-home/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

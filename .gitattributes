@@ -1,0 +1,10 @@
+# Keep the repository LF-only so a Windows checkout does not show the whole
+# tree as modified.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.tgz binary

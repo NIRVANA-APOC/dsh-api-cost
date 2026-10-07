@@ -1,0 +1,56 @@
+{
+  "name": "dsh-api-cost",
+  "version": "1.0.0",
+  "description": "Real-time DeepSeek API cost meter with peak / off-peak rates: a pill under the composer, a /cost command, a session_cost tool and a JSON snapshot, with subagent and agent-team spend rolled into the session that started them.",
+  "type": "module",
+  "license": "MIT",
+  "author": "NIRVANA-APOC",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "cost",
+    "pricing",
+    "usage",
+    "peak-off-peak"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NIRVANA-APOC/dsh-api-cost.git"
+  },
+  "homepage": "https://github.com/NIRVANA-APOC/dsh-api-cost#readme",
+  "bugs": {
+    "url": "https://github.com/NIRVANA-APOC/dsh-api-cost/issues"
+  },
+  "icon": "./icon.svg",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.mjs",
+    "client.js",
+    "lib/pricing.mjs",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
+    "README.md",
+    "README.zh.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

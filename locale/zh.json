@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "API 成本",
+    "description": "实时计算 DeepSeek API 花费，区分高峰 / 空闲时段，输入框下方显示本会话成本（¥ 与 $ 双币种）。"
+  }
+}
