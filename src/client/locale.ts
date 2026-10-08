@@ -7,11 +7,11 @@ export const ZH = {
   'detail.team': '团队成员',
   'detail.sessions': '会话数', 'detail.coverage': '覆盖状态', 'detail.failed': '失败 / 省略会话',
   'detail.rates': '当前费率', 'detail.rateUnit': '元 / 百万 tokens（命中 / 未命中 / 输出）',
-  'detail.complete': '完整',
+  'detail.cardNotes': '费率提示', 'detail.complete': '完整',
   'action.refresh': '刷新', 'action.refreshing': '正在刷新…', 'action.refreshHint': '重新读取此范围的最新统计，不重放会话日志',
   'issue.unknown-model': '未知模型，部分调用未计费', 'issue.invalid-usage': '用量报告无效',
   'issue.missing-usage': '缺少用量报告', 'issue.holiday-data-missing': '节假日数据缺失',
-  'issue.before-rate-card': '调用早于当前价目表', 'issue.routing-disputed': '模型路由存在争议',
+  'issue.before-rate-card': '调用早于当前价目表', 'issue.routing-disputed': 'V4 Pro 路由口径存在冲突（仍按 Pro 价目表计价）',
   'issue.session-unavailable': '会话不可用', 'issue.scope-unavailable': '统计范围不可用', 'issue.scope-truncated': '统计范围已截断',
 } as const
 export type LocaleKey = keyof typeof ZH
@@ -25,11 +25,11 @@ export const EN: Record<LocaleKey, string> = {
   'detail.team': 'Team roster',
   'detail.sessions': 'Sessions', 'detail.coverage': 'Coverage', 'detail.failed': 'Failed / omitted sessions',
   'detail.rates': 'Current rates', 'detail.rateUnit': 'CNY / 1M tokens (hit / miss / output)',
-  'detail.complete': 'Complete',
+  'detail.cardNotes': 'Rate card notes', 'detail.complete': 'Complete',
   'action.refresh': 'Refresh', 'action.refreshing': 'Refreshing…', 'action.refreshHint': 'Read the latest totals for this scope without replaying session logs',
   'issue.unknown-model': 'Unknown model; some calls are unpriced', 'issue.invalid-usage': 'Invalid usage report',
   'issue.missing-usage': 'Missing usage report', 'issue.holiday-data-missing': 'Holiday data missing',
-  'issue.before-rate-card': 'Call predates current rate card', 'issue.routing-disputed': 'Disputed model routing',
+  'issue.before-rate-card': 'Call predates current rate card', 'issue.routing-disputed': 'V4 Pro routing is disputed (still priced on the Pro card)',
   'issue.session-unavailable': 'Session unavailable', 'issue.scope-unavailable': 'Scope unavailable', 'issue.scope-truncated': 'Scope truncated',
 }
 export const fallbackTranslate: Translate = (key, params) => ZH[key].replace(/\{(\w+)\}/g, (match: string, name: string) => params && name in params ? String(params[name]) : match)

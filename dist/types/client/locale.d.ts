@@ -22,6 +22,7 @@ export declare const ZH: {
     readonly 'detail.failed': "失败 / 省略会话";
     readonly 'detail.rates': "当前费率";
     readonly 'detail.rateUnit': "元 / 百万 tokens（命中 / 未命中 / 输出）";
+    readonly 'detail.cardNotes': "费率提示";
     readonly 'detail.complete': "完整";
     readonly 'action.refresh': "刷新";
     readonly 'action.refreshing': "正在刷新…";
@@ -31,7 +32,7 @@ export declare const ZH: {
     readonly 'issue.missing-usage': "缺少用量报告";
     readonly 'issue.holiday-data-missing': "节假日数据缺失";
     readonly 'issue.before-rate-card': "调用早于当前价目表";
-    readonly 'issue.routing-disputed': "模型路由存在争议";
+    readonly 'issue.routing-disputed': "V4 Pro 路由口径存在冲突（仍按 Pro 价目表计价）";
     readonly 'issue.session-unavailable': "会话不可用";
     readonly 'issue.scope-unavailable': "统计范围不可用";
     readonly 'issue.scope-truncated': "统计范围已截断";

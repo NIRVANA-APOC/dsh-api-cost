@@ -112,6 +112,8 @@ function CoverageRows({ coverage, t }: { coverage: Coverage | undefined; t: Tran
   return <>
     <Row label={t('detail.coverage')}>{t(status)}</Row>
     {(coverage.failedSessions > 0 || coverage.omittedSessions > 0) && <Row label={t('detail.failed')}>{coverage.failedSessions} / {coverage.omittedSessions}</Row>}
+    {/* Session-scope gaps. Rate-card caveats are a separate row: a complete
+        session must never read as partial because the card is disputed. */}
     {coverage.issues.length > 0 && <Row label={t('cost.partial')} wrap>{coverage.issues.map(issue => t(`issue.${issue}`)).join(' · ')}</Row>}
   </>
 }
@@ -124,7 +126,9 @@ function PricingRows({ pricing, t }: { pricing: PricingView | null; t: Translate
       const rates = (pricing.peak ? value.peak : value.offPeak).cny
       return <span key={model}>{value.label}: {rates.cacheHit} / {rates.cacheMiss} / {rates.output}</span>
     })}<span className="dac-actionNote">{t('detail.rateUnit')}</span></div></Row>
-    {pricing.issues.length > 0 && <Row label={t('cost.partial')} wrap>{pricing.issues.map(issue => t(`issue.${issue}`)).join(' · ')}</Row>}
+    {/* A card-level caveat, deliberately NOT the coverage label: this rests on
+        the published rate card, not on this session's numbers. */}
+    {pricing.issues.length > 0 && <Row label={t('detail.cardNotes')} wrap>{pricing.issues.map(issue => t(`issue.${issue}`)).join(' · ')}</Row>}
   </>
 }
 interface PanelProps extends CostPillProps {
