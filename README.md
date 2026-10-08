@@ -14,6 +14,10 @@
 
 DeepSeek prices its official API by time of day: weekday working hours in Beijing time are **peak** (double price), and everything else — nights, weekends, Chinese statutory holidays — is **off-peak**. DSH itself shows token counts, not money. This plugin turns those tokens into money, without touching a single request.
 
+Three things make the figure worth trusting. It prices against the **statutory-holiday and makeup-workday calendar**, so a holiday Monday is not billed at peak. It can **recount from the session logs** — idempotently, keyed by `turn:step` — recovering calls that settled before the plugin loaded or were lost across a restart. And it **attributes delegated work** instead of hiding it: subagent and agent-team spend rolls into the session that started it, split into `this session` and `subsessions ×N`.
+
+It is deliberately small: **no runtime dependencies, no build step, no database** — two source files and a pricing table, with the UI built on nothing but the host's own platform seeds.
+
 **Contents:** [Features](#features) · [Install](#install) · [Usage](#usage) · [Screenshots](#screenshots) · [Pricing](#pricing) · [Configuration](#configuration) · [Limitations](#limitations) · [Development](#development) · [Contributing](#contributing) · [License](#license)
 
 ## Features
