@@ -90,7 +90,11 @@ All routes are GET-only, and deliberately live outside `/api` — that bridge be
 
 ## Screenshots
 
-The detail panel, in a single session and in an agent-team session — the labels follow the app's language:
+The composer pill in both tiers, and the detail panel it opens — the labels follow the app's language:
+
+| Off-peak | Peak |
+| --- | --- |
+| ![The composer pill in the off-peak tier: the session cost in CNY with the tier beside it, drawn in the neutral colour](assets/pill-off-peak.png) | ![The same pill during peak hours, drawn in the warning colour, with the tier spelled out beside the amount](assets/pill-peak.png) |
 
 ![The detail panel: the session total in CNY and USD, the current tier with a countdown to the next switch, the peak / off-peak split, the rates in force, and the recount button with the calls it recovered](assets/panel-session.png)
 
