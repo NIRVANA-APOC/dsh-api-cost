@@ -10,7 +10,7 @@ carousel shows them in.
 | --- | --- |
 | `pill-off-peak.png` | The composer pill in the off-peak tier: the session cost in CNY with the tier beside it, in the neutral colour. |
 | `pill-peak.png` | The same pill during peak hours: the capsule switches to the warning colour, and the tier is still spelled out in words rather than signalled by colour alone. |
-| `panel-session.png` | The detail panel for a single session: the total in CNY and USD, the current tier with a countdown, the peak / off-peak split, the rates in force, and the recount button with the number of calls it recovered. |
+| `panel-session.png` | The detail panel for a single session: the total in CNY and USD, the current tier with a countdown, the peak / off-peak split, the rates in force, and the recount button. |
 | `panel-team.png` | The same panel for an agent-team session: the total split into "of which this session" and "of which team members ×N", with the roster below and the Lead marked ★. |
 
 All four were captured in a Chinese UI; the labels follow the app's language.

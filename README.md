@@ -100,7 +100,7 @@ The composer pill in both tiers, and the detail panel it opens — the labels fo
 | --- | --- |
 | ![The composer pill in the off-peak tier: the session cost in CNY with the tier beside it, drawn in the neutral colour](assets/pill-off-peak.png) | ![The same pill during peak hours, drawn in the warning colour, with the tier spelled out beside the amount](assets/pill-peak.png) |
 
-![The detail panel: the session total in CNY and USD, the current tier with a countdown to the next switch, the peak / off-peak split, the rates in force, and the recount button with the call count it proved](assets/panel-session.png)
+![The detail panel: the session total in CNY and USD, the current tier with a countdown to the next switch, the peak / off-peak split, the rates in force, and the recount button](assets/panel-session.png)
 
 ![The same panel for an agent team: the total split into "of which this session" and "of which team members", with the roster below and the Lead marked with a star](assets/panel-team.png)
 
