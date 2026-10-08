@@ -21,7 +21,7 @@ What that buys you:
 - **Honest delegation and team totals** — `self`, `tree` and `team` scopes resolved from durable subagent catalogs and the team roster, with `own` always meaning *this session* and `others = total − own`.
 - **Lightweight by construction** — no replay framework, no database, no polling loop. Built artifacts: client ≈ **9.3 KiB gzip**, host ≈ **10.3 KiB gzip**.
 
-**Contents:** [Requirements](#requirements) · [Install](#install) · [Usage](#usage) · [Screenshots](#screenshots) · [HTTP](#http) · [Rates](#rates) · [Configuration](#configuration) · [What it does not promise](#what-it-does-not-promise) · [Development](#development) · [Migrating from 1.x](#migrating-from-1x) · [License](#license)
+**Contents:** [Requirements](#requirements) · [Install](#install) · [Usage](#usage) · [HTTP](#http) · [Rates](#rates) · [Configuration](#configuration) · [What it does not promise](#what-it-does-not-promise) · [Development](#development) · [Migrating from 1.x](#migrating-from-1x) · [License](#license)
 
 ## Requirements
 
@@ -47,9 +47,15 @@ Host-side features (the projection, `/cost`, `session_cost`, the HTTP reads) tak
 
 Beside the shipped session-stats pills, the cost pill shows this session's estimated spend and the period in force (**peak** / **off-peak** spelled out in words, never colour alone). It reads the host projection directly, so it repaints when a settlement lands — not on a timer. A `Partial` marker appears whenever any contributing session is unpriced, truncated or unreadable.
 
+| Off-peak | Peak |
+| --- | --- |
+| ![The pill in the off-peak tier: this session's cost in CNY with the tier written as the word 谷, in the neutral colour](assets/pill-off-peak.png) | ![The same figure during peak hours: the tier reads 峰 and the capsule switches to the warning colour](assets/pill-peak.png) |
+
 ### The panel
 
 Clicking the pill (or pressing Enter on it) opens a trigger-anchored dialog: totals, the this-session / other-session split, the peak / off-peak split, the priced-call count, coverage, the team roster when the scope is a team, current rates, a rate-card notes row when the published card carries a caveat that affects this scope, the countdown to the next period change, and a **Refresh** button that re-reads the scope instead of replaying logs. Token buckets and the per-model breakdown are deliberately not on the panel; they stay available through `/cost`, `session_cost` and `detail=full`.
+
+![The detail panel for one session: total in CNY and USD, this-session and other-session split, partial coverage naming the unknown-model reason, session and priced-call counts, the peak and off-peak split, the period with a countdown, the rates in force, and the Refresh button](assets/panel-session.png)
 
 ### Scopes
 
@@ -60,24 +66,16 @@ Clicking the pill (or pressing Enter on it) opens a trigger-anchored dialog: tot
 | `tree` | This session plus every durable subagent descendant. |
 | `team` | The whole team: lead, members and their descendants. Refused when membership cannot be verified. |
 
+A `team` scope names every member's own money under **Team roster**, with the Lead marked ★:
+
+![The detail panel for a Team scope: the total with the requesting seat's own share, complete coverage across seven sessions, and the roster with the Lead marked ★ and one money figure per member](assets/panel-team.png)
+
 ### Command and tool
 
 | Surface | Behaviour |
 | --- | --- |
 | `/cost [sessionId] [auto\|self\|tree\|team]` | Prints the same summary the pill shows, including coverage warnings. |
 | `session_cost` | Lets the assistant read a session's estimate; defaults to the calling session. |
-
-## Screenshots
-
-The composer pill in both tiers, and the panel for one session and for a Team scope (captured in a Chinese UI; the labels follow the app's language):
-
-| Off-peak | Peak |
-| --- | --- |
-| ![The pill in the off-peak tier: this session's cost in CNY with the tier written as the word 谷, in the neutral colour](assets/pill-off-peak.png) | ![The same figure during peak hours: the tier reads 峰 and the capsule switches to the warning colour](assets/pill-peak.png) |
-
-![The detail panel for one session: total in CNY and USD, this-session and other-session split, partial coverage naming the unknown-model reason, session and priced-call counts, the peak and off-peak split, the period with a countdown, the rates in force, and the Refresh button](assets/panel-session.png)
-
-![The detail panel for a Team scope: the total with the requesting seat's own share, complete coverage across seven sessions, and the roster with the Lead marked ★ and one money figure per member](assets/panel-team.png)
 
 ## HTTP
 
