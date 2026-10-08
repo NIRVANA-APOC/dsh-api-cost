@@ -14,7 +14,7 @@
 
 DeepSeek prices its official API by time of day: weekday working hours in Beijing time are **peak** (double price), and everything else — nights, weekends, Chinese statutory holidays — is **off-peak**. DSH itself shows token counts, not money. This plugin turns those tokens into money, without touching a single request.
 
-Three things make the figure worth trusting. It prices against the **statutory-holiday and makeup-workday calendar**, so a holiday Monday is not billed at peak. It can **recount from the session logs** — idempotently, keyed by `turn:step` — recovering calls that settled before the plugin loaded or were lost across a restart. And it **attributes delegated work** instead of hiding it: subagent and agent-team spend rolls into the session that started it, split into `this session` and `subsessions ×N`.
+Three things make the figure worth trusting. It prices against the **statutory-holiday and makeup-workday calendar**, so a holiday Monday is not billed at peak. It **replays the session logs by itself** on the first read of a conversation — idempotently, keyed by `turn:step` — so opening one from the sidebar, or coming back to it after a restart, shows the calls it already made instead of zero. And it **attributes delegated work** instead of hiding it: subagent and agent-team spend rolls into the session that started it, split into `this session` and `subsessions ×N`.
 
 It is deliberately small: **no runtime dependencies, no build step, no database** — two source files and a pricing table, with the UI built on nothing but the host's own platform seeds.
 
@@ -26,7 +26,7 @@ It is deliberately small: **no runtime dependencies, no build step, no database*
 - **An anchored detail panel** — countdown to the next tier switch, the peak / off-peak split, token buckets (cache hit, cache miss, output), per-model spend, and the calls still in flight.
 - **Priced at settlement time** — every model call is priced at the tier in force when it settled, so a conversation that crosses a boundary books the two tiers separately instead of pricing the whole thing at one rate.
 - **Subagents and agent teams roll up** — delegated work counts towards the session that started it, and the panel splits the total into "this session" and "subsessions ×N".
-- **Recount** — replays the session log to recover calls that settled before the plugin loaded, or that were lost across a restart. Idempotent: replay is keyed by `turn:step`, so pressing it twice does not double-count.
+- **History without being asked** — the first time a conversation is read, its durable log is replayed, so an opened or resumed session already includes the calls that settled before the plugin loaded. Replay is idempotent (keyed by `turn:step`), and the panel's recount button can always be pressed again without double-counting.
 - **Three surfaces, one set of figures** — the `/cost` command, the `session_cost` tool, and a plain GET JSON snapshot.
 - **Zero runtime dependencies** — no build step and no bundler; the UI is built on the host's platform seeds only.
 
@@ -131,6 +131,7 @@ Override the plugin's row in your profile patch:
     tree: true                       # subsessions count towards the session that started them
     team: true                       # a Team member reports the whole team by default
     holidays: {}                     # add future years, or correct one
+    autoRecount: true                # replay a session's log the first time it is read
     tool: true                       # register the session_cost tool
     command: true                    # register /cost
 ```
@@ -141,7 +142,7 @@ To report a session without its delegation tree, ask for it directly: `GET /dsh-
 
 - **It is an estimate, not a bill.** It prices the tokens the model reports against the published card, so credits, discounts and retry behaviour are invisible to it.
 - **Only DeepSeek's official card is priced.** Other providers and third-party routers are reported as unknown models at cost 0 rather than guessed at.
-- **It counts what settles while it is loaded**, until you press recount — the session logs are the source of truth for anything earlier.
+- **It counts what settles while it is loaded**, and replays the durable log the first time a conversation is read — a resumed conversation is priced from its log rather than from zero. If a log cannot be read, the panel's recount button says so instead of pretending to succeed.
 - **Subsession attribution depends on the runtime.** Delegations that ended before the plugin loaded, and were never recorded, cannot be recovered afterwards.
 - **The card is maintained by hand.** A price change needs `lib/pricing.mjs` updated and a restart.
 - **`deepseek-v4-pro` routing is disputed** — whether calls after 2026-09-14 12:00 are routed to Flash and billed as Flash. The plugin prices it as Pro and flags the conflict in the snapshot's `routingDisputed` field rather than silently choosing a side.
@@ -152,7 +153,7 @@ Estimates that fall outside the card — calls older than the effective date, a 
 ## Development
 
 ```sh
-npm test        # node --test — 118 tests, no dependencies to install
+npm test        # node --test — 120 tests, no dependencies to install
 ```
 
 | Path | Role |
@@ -160,7 +161,7 @@ npm test        # node --test — 118 tests, no dependencies to install
 | `index.mjs` | Host half: meters model calls, prices them at settlement, keeps the ledger, serves the HTTP routes, registers the tool and the command |
 | `client.js` | Client half: the composer pill and the detail panel |
 | `lib/pricing.mjs` | Rate card, peak / off-peak calendar and the pricing functions (pure, zero-dependency) |
-| `test/` | 118 tests over pricing, the host ledger and the client bundle |
+| `test/` | 120 tests over pricing, the host ledger and the client bundle |
 | `cordis.patch.yml` | The bundle patch that inserts the plugin row |
 
 The client bundle registers itself with `window.__ModuleLoader__.load({ id: <package name> })`. That id **must equal the package name**: the combo route serves every client bundle as a single script, so a bundle that registers under the wrong key fails the whole response. `test/client.test.mjs` reads the expected id from `package.json`, which is why a rename cannot silently drift past it.

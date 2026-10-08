@@ -256,6 +256,7 @@ function foldCall(ledger, pending, usage, options) {
  * @param {boolean} [config.command] - register the `/cost` command (default true).
  * @param {boolean} [config.tree] - roll subagent sessions into their parent's figure (default true).
  * @param {boolean} [config.team] - report the whole Agent Team when the session is a member (default true).
+ * @param {boolean} [config.autoRecount] - replay a session's durable log the first time it is read, so an opened or resumed conversation shows its real figure without pressing recount (default true).
  */
 export function apply(ctx, config = {}) {
   /** Options threaded into every pricing call (holiday override only). */
@@ -264,6 +265,8 @@ export function apply(ctx, config = {}) {
   const includeTree = config.tree !== false
   /** Whether a Team member's figure covers the whole Team by default. */
   const includeTeam = config.team !== false
+  /** Whether the first read of an unmetered session replays its durable log. */
+  const autoRecount = config.autoRecount !== false
   const routePrefix = typeof config.routePrefix === 'string' && config.routePrefix !== ''
     ? config.routePrefix.replace(/\/+$/, '')
     : '/dsh-api-cost/api'
@@ -287,7 +290,7 @@ export function apply(ctx, config = {}) {
   const treePending = new Set()
 
   /** Diagnostic counter so a silent wiring failure is visible in the log. */
-  const seen = { requests: 0, usage: 0, routes: 0, reconciles: 0 }
+  const seen = { requests: 0, usage: 0, routes: 0, reconciles: 0, autoReplays: 0 }
   let lastError = null
   let lastUsageSample = null
   /** The most recent reconcile report, so a client can show what a refresh did. */
@@ -762,6 +765,68 @@ export function apply(ctx, config = {}) {
   }
 
   /* ---------------------------------------------------------------- *
+   * Automatic replay
+   * ---------------------------------------------------------------- */
+
+  /** Automatic replay attempts, `sessionId -> { at, ok, tries }`. */
+  const replayed = new Map()
+  /** In-flight automatic replays, so concurrent readers share a single pass. */
+  const replaying = new Map()
+  /** A failed automatic replay waits this long before trying again. */
+  const REPLAY_RETRY_MS = 15000
+  /** ...and stops asking after this many attempts for one session. */
+  const REPLAY_MAX_TRIES = 3
+
+  /**
+   * Bring a session's ledger up from its durable log the first time this process
+   * is asked about it — without waiting for someone to press recount.
+   *
+   * A conversation opened from the sidebar, or resumed after a restart, has no
+   * live meter behind it: the Host only sees calls that settle while it is
+   * running. Replaying the log on the first read is what makes the pill, `/cost`
+   * and `session_cost` show that conversation's real figure straight away, in
+   * every scope, instead of zero until a human notices.
+   *
+   * A pass runs at most once per session: success is remembered, and even a pass
+   * that recovers nothing leaves a ledger behind, so the guard is the ledger
+   * itself. A pass that fails — an unreadable log, or a composition without the
+   * `sessionQuery` service — is retried after {@link REPLAY_RETRY_MS} up to
+   * {@link REPLAY_MAX_TRIES} times, so a transient miss heals itself while a
+   * permanent one stops asking.
+   *
+   * @param {string} sessionId - session about to be read ('' for none).
+   * @param {'auto'|'tree'|'team'|'self'|'corpus'} scope - the scope the caller asked for.
+   * @returns {Promise<object|null>} the reconcile report, or null when no pass ran.
+   */
+  async function replayOnce(sessionId, scope) {
+    if (autoRecount !== true || sessionId === '') return null
+    if (ledgers.has(sessionId)) return null
+    const running = replaying.get(sessionId)
+    if (running !== undefined) return running
+    const attempt = replayed.get(sessionId)
+    if (attempt !== undefined) {
+      if (attempt.ok === true || attempt.tries >= REPLAY_MAX_TRIES) return null
+      if (Date.now() - attempt.at < REPLAY_RETRY_MS) return null
+    }
+    const tries = attempt === undefined ? 1 : attempt.tries + 1
+    const pass = reconcile(sessionId, scope === 'corpus' ? 'corpus' : (scope === undefined || scope === '' ? 'auto' : scope))
+      .then((report) => {
+        const ok = report !== null && report !== undefined && report.ok === true
+        replayed.set(sessionId, { at: Date.now(), ok, tries })
+        if (ok) seen.autoReplays += 1
+        return ok ? report : null
+      })
+      .catch((error) => {
+        replayed.set(sessionId, { at: Date.now(), ok: false, tries })
+        lastError = String(error && error.message ? error.message : error)
+        return null
+      })
+      .finally(() => { replaying.delete(sessionId) })
+    replaying.set(sessionId, pass)
+    return pass
+  }
+
+  /* ---------------------------------------------------------------- *
    * Read models
    * ---------------------------------------------------------------- */
 
@@ -1113,6 +1178,7 @@ export function apply(ctx, config = {}) {
         usageReports: seen.usage,
         sessions: ledgers.size,
         reconciles: seen.reconciles,
+        autoReplays: seen.autoReplays,
         lastReconcile,
         lastError,
       },
@@ -1123,19 +1189,23 @@ export function apply(ctx, config = {}) {
   /**
    * The HTTP snapshot, after refreshing the delegation tree. A resolved tree
    * means the first paint after a delegation already includes the subsessions;
-   * a failed read still answers, from the recorded edges.
+   * a failed read still answers, from the recorded edges. A session this process
+   * has not metered yet is replayed from its log first, so the first paint after
+   * opening or resuming a conversation already carries its history.
    * @param {string} sessionId - session to report ('' for none).
    * @param {number} now - reference instant.
    * @param {'auto'|'tree'|'team'|'self'} scope - requested scope.
    * @returns {Promise<object>} the snapshot payload.
    */
   async function snapshotResolved(sessionId, now, scope, force) {
+    await replayOnce(sessionId, scope)
     await ensureTree(sessionId, now, force)
     return snapshot(sessionId, now, scope)
   }
 
   /**
-   * The session-only view, after refreshing the delegation tree.
+   * The session-only view, after refreshing the delegation tree and, for a
+   * session this process has not metered yet, replaying its log.
    * @param {string} sessionId - session to report ('' for none).
    * @param {number} now - reference instant.
    * @param {'auto'|'tree'|'team'|'self'} scope - requested scope.
@@ -1143,6 +1213,7 @@ export function apply(ctx, config = {}) {
    */
   async function sessionResolved(sessionId, now, scope, force) {
     if (sessionId === '') return { ok: true, session: null, scope }
+    await replayOnce(sessionId, scope)
     await ensureTree(sessionId, now, force)
     const view = sessionView(sessionId, now, scope)
     return { ok: true, session: view.session, scope: view.scope, teamRootId: view.teamRootId }
@@ -1353,6 +1424,10 @@ export function apply(ctx, config = {}) {
           const explicit = typeof args?.sessionId === 'string' && args.sessionId !== '' ? args.sessionId : ''
           const current = sessionIdOf(exec?.agent)
           const sessionId = explicit !== '' ? explicit : (typeof current === 'string' ? current : '')
+          // A conversation that was opened, or resumed after a restart, has a
+          // durable log but no live meter behind it yet: replay that log before
+          // answering, so the tool never reports zero for a session with spend.
+          await replayOnce(sessionId, explicit !== '' ? (includeTree ? 'tree' : 'self') : 'auto')
           // An explicitly named session has no live Agent to resolve Team
           // membership with, so it reports its own subtree.
           const view = sessionView(sessionId, Date.now(), explicit !== '' ? (includeTree ? 'tree' : 'self') : 'auto', exec?.agent)
@@ -1385,11 +1460,14 @@ export function apply(ctx, config = {}) {
         name: 'cost',
         description: 'Show the API cost of this conversation (DeepSeek peak / off-peak rates).',
         input: { hint: '[sessionId]' },
-        handler: (invocation) => {
+        handler: async (invocation) => {
           const raw = typeof invocation?.rawInput === 'string' ? invocation.rawInput.trim() : ''
           const current = sessionIdOf(invocation?.agent)
           const sessionId = raw !== '' ? raw : (typeof current === 'string' ? current : '')
           if (sessionId === '') return { kind: 'error', text: 'No session in scope; pass a session id: /cost <sessionId>' }
+          // An opened or resumed conversation is replayed before the summary is
+          // printed, so /cost agrees with the pill without a manual recount.
+          await replayOnce(sessionId, raw !== '' ? (includeTree ? 'tree' : 'self') : 'auto')
           const now = Date.now()
           // A named session has no live Agent to resolve Team membership with.
           const view = sessionView(sessionId, now, raw !== '' ? (includeTree ? 'tree' : 'self') : 'auto', invocation?.agent)

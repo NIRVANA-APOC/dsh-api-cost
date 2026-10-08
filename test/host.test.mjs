@@ -401,7 +401,7 @@ test('the /cost command reports tier, boundary and current rates', async () => {
   apply(h.ctx)
   replayCall(h, { sessionId: 'session-cmd' })
   h.restore()
-  const result = h.registered.commands[0].handler({ rawInput: '', agent: { id: 'session-cmd' } })
+  const result = await h.registered.commands[0].handler({ rawInput: '', agent: { id: 'session-cmd' } })
   assert.equal(result.kind, 'success')
   assert.match(result.text, /(PEAK|OFF-PEAK)/)
   assert.match(result.text, /Rates now/)
@@ -475,11 +475,12 @@ function logUsage(options) {
   }
 }
 
-test('refresh counts calls that settled before the plugin was listening', async () => {
+test('opening a session with history replays its log before the first answer', async () => {
   const h = harness()
   apply(h.ctx)
   h.restore()
-  // Nothing live was observed at all — the whole figure must come from the log.
+  // Nothing live was observed at all — the whole figure must come from the log,
+  // and it has to arrive without anyone pressing recount.
   const when = Date.parse('2026-09-30T10:00:00+08:00')
   h.sessionLogs.set('old-session', {
     session: { id: 'old-session' },
@@ -491,20 +492,45 @@ test('refresh counts calls that settled before the plugin was listening', async 
   })
   h.setCorpus(['old-session'])
 
-  const before = (await h.request('/dsh-api-cost/api', 'session=old-session')).body.session
-  assert.equal(before.calls, 0, 'nothing is metered before the refresh')
+  const first = (await h.request('/dsh-api-cost/api', 'session=old-session&scope=self')).body
+  assert.equal(first.session.calls, 2, 'the first read already carries the logged history')
+  assert.equal(first.metering.autoReplays, 1, 'the automatic pass is reported in metering')
+  // Priced at the instant the provider reported, not at read time.
+  assert.equal(first.session.tokens.total, 2 * REAL_USAGE.totalTokens)
+  assert.ok(first.session.recent.every((entry) => entry.model === 'deepseek-flash'), 'the logged model is attributed')
 
-  const { status, body } = await h.request('/dsh-api-cost/api/reconcile', 'session=old-session&scope=self')
+  const reads = h.logReads.filter((id) => id === 'old-session').length
+  await h.request('/dsh-api-cost/api', 'session=old-session&scope=self')
+  assert.equal(
+    h.logReads.filter((id) => id === 'old-session').length,
+    reads,
+    'a session is replayed once, not on every poll',
+  )
+})
+
+test('the recount button still works when the automatic pass is switched off', async () => {
+  const h = harness()
+  apply(h.ctx, { autoRecount: false })
+  h.restore()
+  const when = Date.parse('2026-09-30T10:00:00+08:00')
+  h.sessionLogs.set('manual-session', {
+    session: { id: 'manual-session' },
+    events: [logUsage({ time: when, turn: 1, step: 1 }), logUsage({ time: when + 1000, turn: 1, step: 2 })],
+  })
+  h.setCorpus(['manual-session'])
+
+  const before = (await h.request('/dsh-api-cost/api', 'session=manual-session&scope=self')).body
+  assert.equal(before.session.calls, 0, 'autoRecount: false leaves the figure empty until asked')
+  assert.equal(before.metering.autoReplays, 0)
+
+  const { status, body } = await h.request('/dsh-api-cost/api/reconcile', 'session=manual-session&scope=self')
   assert.equal(status, 200)
   assert.equal(body.ok, true)
   assert.equal(body.recovered, 2, 'both logged calls are recovered')
   assert.equal(body.scanned, 1)
 
-  const after = (await h.request('/dsh-api-cost/api', 'session=old-session&scope=self')).body.session
+  const after = (await h.request('/dsh-api-cost/api', 'session=manual-session&scope=self')).body.session
   assert.equal(after.calls, 2, 'the recovered calls are in the ledger')
-  // Priced at the instant the provider reported, not at refresh time.
-  assert.equal(after.tokens.total, 2 * REAL_USAGE.totalTokens)
-  assert.ok(after.recent.every((entry) => entry.model === 'deepseek-flash'), 'the logged model is attributed')
 })
 
 test('refresh is idempotent: pressing it twice does not double the figure', async () => {
@@ -582,7 +608,7 @@ test('a log replay keeps a priced call when the log never recorded its model', a
   assert.equal(after.recent[0].model, 'deepseek-flash')
 })
 
-test('refresh repairs delegation attribution from the corpus headers', async () => {
+test('attribution from the corpus headers survives without live events', async () => {
   const h = harness()
   apply(h.ctx)
   h.restore()
@@ -591,16 +617,18 @@ test('refresh repairs delegation attribution from the corpus headers', async () 
   h.sessionLogs.set('hist-child', { session: { id: 'hist-child', parentSession: 'hist-parent' }, events: [logUsage({ time: when + 5 })] })
   h.setCorpus(['hist-child', 'hist-parent'])
 
-  // No events were ever seen by this process, so nothing links the two and the
-  // child has no ledger at all.
-  const before = (await h.request('/dsh-api-cost/api', 'session=hist-child&scope=self')).body.session
-  assert.equal(before.known, false, 'the child is unknown before the refresh')
+  // No live event ever linked the two, and this process has metered neither: the
+  // first read of the parent must already carry the historical child, because
+  // the corpus header is an authoritative delegation edge.
+  const first = (await h.request('/dsh-api-cost/api', 'session=hist-parent')).body.session
+  assert.equal(first.calls, 2, 'the first read carries the parent plus the historical child')
+  assert.equal(first.children[0].sessionId, 'hist-child', 'the corpus header attributes the child')
+  assert.ok(Math.abs(first.ownCostCny + first.subagentCostCny - first.costCny) < 1e-12)
 
+  // The explicit recount stays available, and stays idempotent.
   await h.request('/dsh-api-cost/api/reconcile', 'session=hist-parent&scope=tree')
   const after = (await h.request('/dsh-api-cost/api', 'session=hist-parent')).body.session
-  assert.equal(after.calls, 2, 'parent plus the historical child')
-  assert.equal(after.children[0].sessionId, 'hist-child', 'the historical child is attributed after the refresh')
-  assert.ok(Math.abs(after.ownCostCny + after.subagentCostCny - after.costCny) < 1e-12)
+  assert.equal(after.calls, 2, 'recounting does not double the figure')
 })
 
 test('the corpus scope sweeps every session the Host can see', async () => {
@@ -638,6 +666,24 @@ test('an unreadable log is reported, not thrown', async () => {
   assert.equal(status, 200)
   assert.equal(body.failed, 1, 'the failure is counted')
   assert.match(String(body.lastError), /no log for ghost/)
+})
+
+test('the tool and /cost answer a resumed conversation without a manual recount', async () => {
+  const h = harness()
+  apply(h.ctx)
+  h.restore()
+  const when = Date.parse('2026-09-30T10:00:00+08:00')
+  h.sessionLogs.set('resumed', { session: { id: 'resumed' }, events: [logUsage({ time: when, turn: 1, step: 1 })] })
+  h.setCorpus(['resumed'])
+
+  const value = await h.registered.tools[0].execute({}, { agent: { id: 'resumed' } })
+  assert.equal(value.calls, 1, 'the tool replays a session it never metered')
+
+  h.sessionLogs.set('resumed-cmd', { session: { id: 'resumed-cmd' }, events: [logUsage({ time: when, turn: 2, step: 1 })] })
+  h.setCorpus(['resumed', 'resumed-cmd'])
+  const result = await h.registered.commands[0].handler({ rawInput: '', agent: { id: 'resumed-cmd' } })
+  assert.equal(result.kind, 'success')
+  assert.match(result.text, /1 calls/, 'the command reports the replayed figure')
 })
 
 /* ------------------------------------------------------------------ *
@@ -744,7 +790,7 @@ test('the tool and command also report the Team', async () => {
 
   // A live Agent carries both `id` and `session`; the fixtures match that.
   const invocation = { rawInput: '', agent: { id: 'team-mate-a', session: { sessionId: 'team-mate-a' } } }
-  const result = h.registered.commands[0].handler(invocation)
+  const result = await h.registered.commands[0].handler(invocation)
   assert.equal(result.kind, 'success')
   assert.match(result.text, /Team/)
 
@@ -985,7 +1031,7 @@ test('the /cost command and the tool report the whole tree', async () => {
   replayCall(h, { sessionId: 'session-cmd-child' })
   h.restore()
 
-  const result = h.registered.commands[0].handler({ rawInput: '', agent: { id: 'session-cmd-parent' } })
+  const result = await h.registered.commands[0].handler({ rawInput: '', agent: { id: 'session-cmd-parent' } })
   assert.equal(result.kind, 'success')
   assert.match(result.text, /subsession/)
 
