@@ -6,6 +6,13 @@ plugin's detail view. Paths there are relative to the repository root, so keep t
 two in sync if you rename anything here. The order in that file is the order the
 carousel shows them in.
 
+The two READMEs embed these same files by absolute
+`https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/…` URL,
+because npm's page and local Markdown previews resolve a repository-relative path
+against their own base and show nothing. If a file is renamed, moved, or the
+default branch changes, update `screenshots.json`, both READMEs and this table in
+one commit.
+
 | File | Shows |
 | --- | --- |
 | `pill-off-peak.png` | The composer pill in the off-peak tier: this session's cost in CNY with the tier written as a word (谷), in the neutral colour. |

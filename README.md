@@ -49,13 +49,13 @@ Beside the shipped session-stats pills, the cost pill shows this session's estim
 
 | Off-peak | Peak |
 | --- | --- |
-| ![The pill in the off-peak tier: this session's cost in CNY with the tier written as the word 谷, in the neutral colour](assets/pill-off-peak.png) | ![The same figure during peak hours: the tier reads 峰 and the capsule switches to the warning colour](assets/pill-peak.png) |
+| ![The pill in the off-peak tier: this session's cost in CNY with the tier written as the word 谷, in the neutral colour](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/pill-off-peak.png) | ![The same figure during peak hours: the tier reads 峰 and the capsule switches to the warning colour](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/pill-peak.png) |
 
 ### The panel
 
 Clicking the pill (or pressing Enter on it) opens a trigger-anchored dialog: totals, the this-session / other-session split, the peak / off-peak split, the priced-call count, coverage, the team roster when the scope is a team, current rates, a rate-card notes row when the published card carries a caveat that affects this scope, the countdown to the next period change, and a **Refresh** button that re-reads the scope instead of replaying logs. Token buckets and the per-model breakdown are deliberately not on the panel; they stay available through `/cost`, `session_cost` and `detail=full`.
 
-![The detail panel for one session: total in CNY and USD, this-session and other-session split, partial coverage naming the unknown-model reason, session and priced-call counts, the peak and off-peak split, the period with a countdown, the rates in force, and the Refresh button](assets/panel-session.png)
+![The detail panel for one session: total in CNY and USD, this-session and other-session split, partial coverage naming the unknown-model reason, session and priced-call counts, the peak and off-peak split, the period with a countdown, the rates in force, and the Refresh button](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/panel-session.png)
 
 ### Scopes
 
@@ -68,7 +68,7 @@ Clicking the pill (or pressing Enter on it) opens a trigger-anchored dialog: tot
 
 A `team` scope names every member's own money under **Team roster**, with the Lead marked ★:
 
-![The detail panel for a Team scope: the total with the requesting seat's own share, complete coverage across seven sessions, and the roster with the Lead marked ★ and one money figure per member](assets/panel-team.png)
+![The detail panel for a Team scope: the total with the requesting seat's own share, complete coverage across seven sessions, and the roster with the Lead marked ★ and one money figure per member](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/panel-team.png)
 
 ### Command and tool
 

@@ -49,13 +49,13 @@ dsh plugin --profile web add /absolute/path/to/checkout  # 从仓库或 git 地�
 
 | 空闲 | 高峰 |
 | --- | --- |
-| ![空闲时段的胶囊：本会话花费，时段用文字写成「谷」，整体为中性色](assets/pill-off-peak.png) | ![高峰时段的同一枚胶囊：时段写作「峰」，胶囊转为警示色](assets/pill-peak.png) |
+| ![空闲时段的胶囊：本会话花费，时段用文字写成「谷」，整体为中性色](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/pill-off-peak.png) | ![高峰时段的同一枚胶囊：时段写作「峰」，胶囊转为警示色](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/pill-peak.png) |
 
 ### 明细面板
 
 点击胶囊（或对它按回车）弹出锚定在触发器上方的对话框：合计、本会话 / 其他会话拆分、高峰 / 空闲拆分、已计费调用数、覆盖状态、团队范围下的成员名单、当前费率、价目表本身有影响该范围的口径提示时的「费率提示」行、距下次时段切换的倒计时，以及一个**刷新**按钮——它重新读取该范围，而不是重放日志。token 明细与按模型拆分刻意不放进面板，它们仍可通过 `/cost`、`session_cost` 与 `detail=full` 获取。
 
-![单个会话的明细面板：合计（¥ 与 $）、本会话与其他会话拆分、部分统计并写明未知模型原因、会话数与已计费调用数、高峰与空闲拆分、带倒计时的计费时段、当前费率，以及刷新按钮](assets/panel-session.png)
+![单个会话的明细面板：合计（¥ 与 $）、本会话与其他会话拆分、部分统计并写明未知模型原因、会话数与已计费调用数、高峰与空闲拆分、带倒计时的计费时段、当前费率，以及刷新按钮](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/panel-session.png)
 
 ### 范围
 
@@ -68,7 +68,7 @@ dsh plugin --profile web add /absolute/path/to/checkout  # 从仓库或 git 地�
 
 `team` 范围会在「团队成员」下列出每个成员自己的金额，Lead 前置 ★：
 
-![团队范围的明细面板：合计与请求者自身份额、七个会话的完整覆盖，以及 Lead 前置 ★ 且每名成员各一行金额的名单](assets/panel-team.png)
+![团队范围的明细面板：合计与请求者自身份额、七个会话的完整覆盖，以及 Lead 前置 ★ 且每名成员各一行金额的名单](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/panel-team.png)
 
 ### 命令与工具
 
