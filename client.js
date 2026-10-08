@@ -199,9 +199,9 @@ window.__ModuleLoader__.load({
       'rate.unit': '元 / 百万 tokens',
       'action.refresh': '重新统计',
       'action.refreshing': '正在重算…',
-      'action.refreshHint': '从会话日志重新统计：把插件启动前、或未计入的调用补进来',
+      'action.refreshHint': '以会话日志为准，重算该范围内的调用数（含插件启动前、以及进程重启前的）',
       'action.refreshed': '已重算',
-      'action.recovered': '补入 {count} 次调用',
+      'action.recovered': '共 {count} 次调用',
       'action.retry': '重试',
     };
 
@@ -233,9 +233,9 @@ window.__ModuleLoader__.load({
       'rate.unit': 'CNY / 1M tokens',
       'action.refresh': 'Recount',
       'action.refreshing': 'Recounting…',
-      'action.refreshHint': 'Recount from the session logs: picks up calls that settled before the plugin was listening',
+      'action.refreshHint': 'Re-count the calls in scope from the session logs — the source of truth, including calls that settled before the plugin loaded',
       'action.refreshed': 'Recounted',
-      'action.recovered': '{count} calls added',
+      'action.recovered': '{count} calls counted',
       'action.retry': 'Retry',
     };
 

@@ -336,7 +336,7 @@ function fakeContext(options = {}) {
 }
 
 /** Templates the fake locale seat resolves; everything else falls back to `t:<key>`. */
-const ZH_TEMPLATES = { 'cost.pill': '花费 {amount}', 'tok': 'tok', 'action.recovered': '补入 {count} 次调用' }
+const ZH_TEMPLATES = { 'cost.pill': '花费 {amount}', 'tok': 'tok', 'action.recovered': '共 {count} 次调用' }
 
 /* ------------------------------------------------------------------ *
  * Tests
@@ -572,7 +572,7 @@ test('the panel lists the Team roster when the scope is a Team', async () => {
   assert.ok((panelText.match(/"type":"br"/g) ?? []).length >= 2, 'the roster stacks one member per line')
 })
 
-test('the footer button recounts from the logs and reports what it recovered', async () => {
+test('the footer button recounts from the logs and reports the call count it proved', async () => {
   const { registration, runtime, require: load } = loadBundle()
   const exports = registration.factory(load)
   const harness = fakeContext()
