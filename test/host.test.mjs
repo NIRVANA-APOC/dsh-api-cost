@@ -218,13 +218,14 @@ test('host half exports the Cordis entry contract', async () => {
   assert.equal(typeof apply, 'function')
 })
 
-test('registers exactly the three cost routes and both event listeners', async () => {
+test('registers exactly the cost routes, both stream listeners and the append feed', async () => {
   const h = harness()
   apply(h.ctx)
   h.restore()
   assert.deepEqual([...h.routes.keys()].sort(), ['/dsh-api-cost/api', '/dsh-api-cost/api/reconcile', '/dsh-api-cost/api/session', '/dsh-api-cost/api/status'])
   assert.ok(h.listeners.has('llm/stream'))
   assert.ok(h.listeners.has('agent/assistant-stream'))
+  assert.ok(h.listeners.has('session/event'), 'the durable append feed is what makes live and recount agree')
   assert.equal(h.registered.tools.length, 1)
   assert.equal(h.registered.tools[0].name, 'session_cost')
   assert.equal(h.registered.commands.length, 1)
@@ -265,9 +266,13 @@ test('a call observed without a usage report is never billed', async () => {
 test('usage without a preceding request still bills, flagged with an unknown model', async () => {
   const h = harness()
   apply(h.ctx)
-  h.emit('agent/assistant-stream', {
-    agent: { id: 'session-c' },
-    frame: { type: 'chunk', chunk: { type: 'usage', usage: REAL_USAGE } },
+  // A call whose attempt this process never saw announced on the stream: the
+  // durable append feed bills it, carrying the log's own position.
+  const when = Date.parse('2026-09-30T10:00:00+08:00')
+  h.emit('session/event', { id: 'session-c' }, {
+    type: 'assistant/message',
+    time: when,
+    data: { turn: 1, step: 1, usage: REAL_USAGE },
   })
   h.restore()
   const { body } = await h.request('/dsh-api-cost/api', 'session=session-c')
@@ -684,6 +689,96 @@ test('the tool and /cost answer a resumed conversation without a manual recount'
   const result = await h.registered.commands[0].handler({ rawInput: '', agent: { id: 'resumed-cmd' } })
   assert.equal(result.kind, 'success')
   assert.match(result.text, /1 calls/, 'the command reports the replayed figure')
+})
+
+/* ------------------------------------------------------------------ *
+ * Live billing agrees with the log
+ * ------------------------------------------------------------------ */
+
+test('a call is keyed by the position its attempt announced, not collapsed', async () => {
+  const h = harness()
+  apply(h.ctx)
+  // The shape the Host actually publishes: `start` carries turn/step, and the
+  // usage arrives on a chunk of the same attempt that carries neither.
+  for (const [turn, step] of [[1, 1], [1, 2], [2, 1]]) {
+    const attemptId = `attempt-${String(turn)}-${String(step)}`
+    h.emit('agent/assistant-stream', { agent: { id: 'shape' }, frame: { type: 'start', attemptId, revision: 1, turn, step } })
+    h.emit('agent/assistant-stream', {
+      agent: { id: 'shape' },
+      frame: { type: 'chunk', attemptId, revision: 1, index: 0, time: Date.now(), chunk: { type: 'usage', usage: REAL_USAGE } },
+    })
+    h.emit('agent/assistant-stream', { agent: { id: 'shape' }, frame: { type: 'end', attemptId, revision: 1, index: 1, outcome: { kind: 'abandoned' } } })
+  }
+  h.restore()
+
+  const { body } = await h.request('/dsh-api-cost/api', 'session=shape&scope=self')
+  assert.equal(body.session.calls, 3, 'three attempts are three calls')
+  assert.equal(body.session.tokens.total, 3 * REAL_USAGE.totalTokens, 'every report is counted')
+  assert.deepEqual(
+    body.session.recent.map((entry) => `${String(entry.origin.turn)}:${String(entry.origin.step)}`).sort(),
+    ['1:1', '1:2', '2:1'],
+    'each call keeps the position of its attempt',
+  )
+})
+
+test('a usage report with no known position is left to the durable feed', async () => {
+  const h = harness()
+  apply(h.ctx)
+  h.emit('agent/assistant-stream', {
+    agent: { id: 'orphan' },
+    frame: { type: 'chunk', attemptId: 'never-announced', revision: 1, index: 0, time: Date.now(), chunk: { type: 'usage', usage: REAL_USAGE } },
+  })
+  h.restore()
+  const { body } = await h.request('/dsh-api-cost/api', 'session=orphan&scope=self')
+  assert.equal(body.session.calls, 0, 'an unkeyed report must not create a shared entry')
+})
+
+test('the durable feed bills, and a replay of the same log agrees', async () => {
+  const h = harness()
+  apply(h.ctx)
+  const when = Date.parse('2026-09-30T10:00:00+08:00')
+  const events = [
+    { type: 'request/header', time: when - 10, data: { header: { config: { model: 'deepseek-flash' } } } },
+    logUsage({ time: when, turn: 1, step: 1 }),
+    logUsage({ time: when + 500, turn: 1, step: 2 }),
+  ]
+  for (const event of events) h.emit('session/event', { id: 'feed' }, event)
+  h.restore()
+
+  const live = (await h.request('/dsh-api-cost/api', 'session=feed&scope=self')).body.session
+  assert.equal(live.calls, 2, 'both calls are billed as they are appended')
+  assert.equal(live.recent[0].model, 'deepseek-flash', 'the request header supplies the model')
+
+  // The same two calls are in the log: a replay must fold them onto the same
+  // positions, not stack a second copy on top.
+  h.sessionLogs.set('feed', { session: { id: 'feed' }, events })
+  h.setCorpus(['feed'])
+  await h.request('/dsh-api-cost/api/reconcile', 'session=feed&scope=self')
+  const replayed = (await h.request('/dsh-api-cost/api', 'session=feed&scope=self')).body.session
+  assert.equal(replayed.calls, 2, 'a recount of the same log does not add calls')
+  assert.equal(replayed.tokens.total, live.tokens.total, 'token buckets agree across the two paths')
+  assert.ok(Math.abs(replayed.costCny - live.costCny) < 1e-12, 'the figure agrees across the two paths')
+})
+
+test('a usage chunk and its durable event bill one call, not two', async () => {
+  const h = harness()
+  apply(h.ctx)
+  const when = Date.parse('2026-09-30T10:00:00+08:00')
+  h.emit('agent/assistant-stream', { agent: { id: 'both' }, frame: { type: 'start', attemptId: 'a1', revision: 1, turn: 3, step: 2 } })
+  h.emit('agent/assistant-stream', {
+    agent: { id: 'both' },
+    frame: { type: 'chunk', attemptId: 'a1', revision: 1, index: 0, time: when, chunk: { type: 'usage', usage: REAL_USAGE } },
+  })
+  h.emit('session/event', { id: 'both' }, {
+    type: 'assistant/message',
+    time: when,
+    data: { turn: 3, step: 2, usage: REAL_USAGE },
+  })
+  h.restore()
+
+  const { body } = await h.request('/dsh-api-cost/api', 'session=both&scope=self')
+  assert.equal(body.session.calls, 1, 'the same call seen on both paths is one call')
+  assert.equal(body.session.tokens.total, REAL_USAGE.totalTokens)
 })
 
 /* ------------------------------------------------------------------ *

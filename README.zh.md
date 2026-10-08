@@ -158,7 +158,7 @@ $ 为官方独立公布的美元列，不是汇率换算。
 ## 开发
 
 ```sh
-npm test        # node --test —— 120 项测试，无需安装任何依赖
+npm test        # node --test —— 124 项测试，无需安装任何依赖
 ```
 
 | 文件 | 作用 |
@@ -166,10 +166,12 @@ npm test        # node --test —— 120 项测试，无需安装任何依赖
 | `index.mjs` | Host 半边：监听模型调用与用量、按结算时刻计价、记账、HTTP 路由、工具与命令 |
 | `client.js` | Client 半边：输入框下方的胶囊与明细面板 |
 | `lib/pricing.mjs` | 价目表、峰谷日历、计价函数（纯函数、零依赖） |
-| `test/` | 120 项测试：计价引擎、Host 记账、Client bundle |
+| `test/` | 124 项测试：计价引擎、Host 记账、Client bundle |
 | `cordis.patch.yml` | 插入插件行的 bundle 补丁 |
 
 Client bundle 通过 `window.__ModuleLoader__.load({ id: <包名> })` 注册自己，这个 id **必须等于包名**：combo 路由把每个 client bundle 合成一个脚本下发，注册键不对会拖垮整条响应。`test/client.test.mjs` 从 `package.json` 读取期望值，所以改名不会悄悄绕过这条约束。
+
+Host 记的是**与重新统计同一份持久事件**：实时 `session/event` 流与日志重放走同一条 fold，按调用的 `turn:step` 记账。所以运行中的数字与重算结果一致，同一个调用从两条路进来也只算一次。位置未知的用量上报（chunk 帧所属的 `start` 帧本进程没见过）交给追加事件流处理，而不是折进一个共用键——那正是曾经把整个会话的调用塌缩成一条的原因。
 
 ## 贡献
 

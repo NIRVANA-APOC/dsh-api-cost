@@ -153,7 +153,7 @@ Estimates that fall outside the card — calls older than the effective date, a 
 ## Development
 
 ```sh
-npm test        # node --test — 120 tests, no dependencies to install
+npm test        # node --test — 124 tests, no dependencies to install
 ```
 
 | Path | Role |
@@ -161,10 +161,12 @@ npm test        # node --test — 120 tests, no dependencies to install
 | `index.mjs` | Host half: meters model calls, prices them at settlement, keeps the ledger, serves the HTTP routes, registers the tool and the command |
 | `client.js` | Client half: the composer pill and the detail panel |
 | `lib/pricing.mjs` | Rate card, peak / off-peak calendar and the pricing functions (pure, zero-dependency) |
-| `test/` | 120 tests over pricing, the host ledger and the client bundle |
+| `test/` | 124 tests over pricing, the host ledger and the client bundle |
 | `cordis.patch.yml` | The bundle patch that inserts the plugin row |
 
 The client bundle registers itself with `window.__ModuleLoader__.load({ id: <package name> })`. That id **must equal the package name**: the combo route serves every client bundle as a single script, so a bundle that registers under the wrong key fails the whole response. `test/client.test.mjs` reads the expected id from `package.json`, which is why a rename cannot silently drift past it.
+
+The Host bills the same durable events a recount reads: the live `session/event` feed and the log replay go through one fold, keyed by the call's `turn:step` position. That is why the running figure and a recount agree, and why a call that reaches both paths is counted once. A usage report whose position is unknown — a stream chunk whose `start` frame this process never saw — is left to the append feed rather than folded onto a shared key, which is what once collapsed every call of a session into a single entry.
 
 ## Contributing
 

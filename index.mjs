@@ -225,6 +225,10 @@ function foldCall(ledger, pending, usage, options) {
         && replaced.peak === entry.peak
         && Math.abs(replaced.costCny - entry.costCny) < 1e-12
       if (same) return null
+      // A report that could not resolve the model (the log kept the usage but
+      // not the request header) must not overwrite a priced entry with a zero:
+      // whichever path knew more keeps the entry.
+      if (entry.modelId === '(unknown)' && replaced.modelId !== '(unknown)') return null
       applyEntry(ledger, replaced, -1)
       entry.replaces = replaced.at
       if (reported !== undefined) entry.rawUsage = reported
@@ -275,6 +279,10 @@ export function apply(ctx, config = {}) {
   const ledgers = new Map()
   /** @type {Map<string, PendingCall[]>} */
   const pending = new Map()
+  /** Last model a session's request headers declared, `sessionId -> modelId`. */
+  const models = new Map()
+  /** Positions announced by stream `start` frames, `attemptId -> { turn, step }`. */
+  const attempts = new Map()
   /**
    * Session delegation edges, `childId -> parentId`. A session announces its
    * own parent in `SessionHeader.parentSession`, so a subagent's spend can be
@@ -519,17 +527,33 @@ export function apply(ctx, config = {}) {
   })
 
   /**
-   * Cordis listener for `agent/assistant-stream`: a `usage` chunk is the
-   * provider's own token report for one call, so it is the only thing that is
-   * ever billed. Chunks are cumulative within a call, so the newest report for
-   * a call replaces the previous one rather than adding to it.
+   * Cordis listener for `agent/assistant-stream`.
+   *
+   * Only a `usage` chunk is ever billed — it is the provider's own token report
+   * for one call — but a chunk frame carries no position of its own: `turn` and
+   * `step` are announced by the `start` frame of the same attempt, which is why
+   * attempts are remembered by id. Folding a usage report with no known position
+   * onto a shared key is what once collapsed every call of a session into a
+   * single entry; such a report is now left to the durable append feed instead.
    *
    * @param {object} payload - `{ agent, frame }`.
    */
   ctx.on('agent/assistant-stream', (payload) => {
     try {
       const frame = payload?.frame
-      if (frame === undefined || frame === null || frame.type !== 'chunk') return
+      if (frame === undefined || frame === null) return
+      if (frame.type === 'start') {
+        if (typeof frame.attemptId === 'string' && frame.attemptId !== '') {
+          attempts.set(frame.attemptId, { turn: frame.turn, step: frame.step })
+          if (attempts.size > 64) attempts.delete(attempts.keys().next().value)
+        }
+        return
+      }
+      if (frame.type === 'end') {
+        if (typeof frame.attemptId === 'string') attempts.delete(frame.attemptId)
+        return
+      }
+      if (frame.type !== 'chunk') return
       const chunk = frame.chunk
       if (chunk === undefined || chunk === null || chunk.type !== 'usage') return
       const usage = chunk.usage
@@ -547,25 +571,87 @@ export function apply(ctx, config = {}) {
         totalTokens: usage.totalTokens,
       }
 
+      const origin = attempts.get(frame.attemptId)
+        ?? (typeof frame.turn === 'number' && typeof frame.step === 'number'
+          ? { turn: frame.turn, step: frame.step }
+          : undefined)
+      if (origin === undefined) return
+
       const queue = pending.get(sessionId)
       const call = queue !== undefined && queue.length > 0 ? queue.shift() : undefined
-      const ledger = ledgerFor(sessionId)
-      // The frame's position is the same key a log replay uses, so a call that
-      // later shows up in the durable log replaces this fold instead of adding
-      // to it.
-      foldCall(ledger, {
+      // The position is the same key a log replay uses, so a call that later
+      // reaches the durable feed replaces this fold instead of adding to it.
+      foldCall(ledgerFor(sessionId), {
         modelId: call === undefined ? '' : call.modelId,
         at: Date.now(),
-        origin: { turn: frame.turn, step: frame.step },
+        origin,
       }, usage, options)
     } catch (error) {
       lastError = String(error && error.message ? error.message : error)
     }
   })
 
+  /**
+   * Cordis listener for `session/event`: the post-commit append feed, which
+   * carries every durable event exactly as recorded — the same input a replay
+   * reads. Billing from it is what keeps the running figure and a recount in
+   * agreement, including calls that never passed through a stream this process
+   * observed. Registered `global` so subagent sessions are metered too.
+   *
+   * @param {object} session - the session whose log grew.
+   * @param {object} event - the appended event.
+   */
+  ctx.on('session/event', (session, event) => {
+    try {
+      const sessionId = sessionIdOf(session)
+      if (typeof sessionId !== 'string' || sessionId === '') return
+      foldEvent(sessionId, event)
+    } catch (error) {
+      lastError = String(error && error.message ? error.message : error)
+    }
+  }, { global: true })
+
   /* ---------------------------------------------------------------- *
    * Reconcile (the panel's refresh button)
    * ---------------------------------------------------------------- */
+
+  /**
+   * Fold one durable event into its session's ledger.
+   *
+   * This is the single definition of what a billable call is. The live
+   * `session/event` feed and the log replay both come through here, so the
+   * running figure and a recount cannot disagree, and a call that reaches both
+   * paths is folded twice onto the same `turn:step` key — which replaces, never
+   * adds.
+   *
+   * @param {string} sessionId - session the event belongs to.
+   * @param {object} event - the appended event, exactly as recorded.
+   * @returns {string|null} the call's `turn:step` key when it carried usage.
+   */
+  function foldEvent(sessionId, event) {
+    if (event === null || event === undefined || typeof event !== 'object') return null
+    const data = event.data
+    if (data === null || data === undefined || typeof data !== 'object') return null
+    if (event.type === 'request/header' || event.type === 'request/context') {
+      const config = event.type === 'request/header' ? data.header?.config : data
+      if (typeof config?.model === 'string' && config.model !== '') models.set(sessionId, config.model)
+      return null
+    }
+    let usage
+    if (event.type === 'assistant/message' && data.usage !== undefined) usage = data.usage
+    else if (event.type === 'assistant/chunk' && data.chunk?.type === 'usage') usage = data.chunk.usage
+    if (usage === undefined || usage === null || typeof usage !== 'object') return null
+
+    const turn = data.turn
+    const step = data.step
+    const when = typeof event.time === 'number' ? event.time : Date.now()
+    foldCall(ledgerFor(sessionId), {
+      modelId: models.get(sessionId) ?? '',
+      at: when,
+      origin: { turn, step },
+    }, usage, options)
+    return `${String(turn ?? -1)}:${String(step ?? -1)}`
+  }
 
   /**
    * Replay one session's durable log into its ledger.
@@ -588,74 +674,18 @@ export function apply(ctx, config = {}) {
       return { ok: false, reason: String(error && error.message ? error.message : error), usage: 0, recovered: 0, model: '' }
     }
     const events = snapshot !== null && snapshot !== undefined && Array.isArray(snapshot.events) ? snapshot.events : []
-    const ledger = ledgerFor(sessionId)
-    let model = ''
     let usageEvents = 0
-    /**
-     * Per-call usage this log proves, keyed by the same `turn:step` position the
-     * live listener records. Repeated reports for one position (an attempt
-     * followed by the committed message) keep the newest.
-     * @type {Map<string, {value: object, usage: object, model: string}>}
-     */
-    const scannedCalls = new Map()
+    /** Distinct calls this pass proved, keyed by `turn:step`. */
+    const scannedCalls = new Set()
     for (const event of events) {
-      if (event === null || event === undefined) continue
-      const data = event.data
-      if (data === null || data === undefined) continue
-      if (event.type === 'request/header' || event.type === 'request/context') {
-        const config = event.type === 'request/header' ? data.header?.config : data
-        if (typeof config?.model === 'string' && config.model !== '') model = config.model
-        continue
-      }
-      let usage
-      if (event.type === 'assistant/message' && data.usage !== undefined) usage = data.usage
-      else if (event.type === 'assistant/chunk' && data.chunk?.type === 'usage') usage = data.chunk.usage
-      if (usage === undefined || usage === null || typeof usage !== 'object') continue
+      const key = foldEvent(sessionId, event)
+      if (key === null) continue
       usageEvents += 1
-      const turn = data.turn
-      const step = data.step
-      const when = typeof event.time === 'number' ? event.time : Date.now()
-      const priced = priceUsage(usage, model, when, options)
-      const key = `${String(turn ?? -1)}:${String(step ?? -1)}`
-      /** @type {LedgerEntry} */
-      const value = {
-        model: priced.model.key ?? '(unknown)',
-        modelId: model === '' ? '(unknown)' : model,
-        peak: priced.peak,
-        reason: priced.classification.reason,
-        at: when,
-        tokens: priced.tokens,
-        costCny: priced.costCny,
-        costUsd: priced.costUsd,
-        origin: { turn: turn ?? -1, step: step ?? -1 },
-        beforeCurrentCard: priced.beforeCurrentCard === true,
-        routingDisputed: priced.modelRoutingDisputed === true,
-      }
-      const previous = ledger.seenCalls.get(key)
-      if (previous !== undefined) {
-        const replaced = previous.entry
-        const same = replaced.tokens.total === value.tokens.total
-          && replaced.tokens.cacheHit === value.tokens.cacheHit
-          && replaced.tokens.cacheMiss === value.tokens.cacheMiss
-          && replaced.tokens.output === value.tokens.output
-          && replaced.modelId === value.modelId
-          && replaced.peak === value.peak
-        if (same) continue
-        // A replay that could not resolve the model (the log kept the usage but
-        // not the request header) must not overwrite a priced live entry with a
-        // zero: the live meter knew more than this pass does.
-        if (value.modelId === '(unknown)' && replaced.modelId !== '(unknown)') continue
-        applyEntry(ledger, replaced, -1)
-        value.rawUsage = previous.usage
-        value.replaces = replaced.at
-      }
-      ledger.seenCalls.set(key, { entry: value, usage })
-      applyEntry(ledger, value, 1)
-      scannedCalls.set(key, value)
+      scannedCalls.add(key)
     }
     // The delegation edge comes from the header the corpus preserved.
     if (snapshot !== null && snapshot !== undefined && snapshot.session !== undefined) noteSession(snapshot)
-    return { ok: true, usage: usageEvents, recovered: scannedCalls.size, model }
+    return { ok: true, usage: usageEvents, recovered: scannedCalls.size, model: models.get(sessionId) ?? '' }
   }
 
   /**
