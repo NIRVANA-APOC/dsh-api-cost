@@ -1,6 +1,6 @@
 <h1 align="center">dsh-api-cost</h1>
 
-<p align="center">Real-time DeepSeek API cost with peak / off-peak rates, shown under the composer in CNY and USD.</p>
+<p align="center">Exact DeepSeek cost estimation for DeepSeek Harness: peak / off-peak rates, durable checkpoint recovery, and delegation or team spend attributed to the session that caused it.</p>
 
 <p align="center">
   <a href="https://github.com/NIRVANA-APOC/dsh-api-cost/actions/workflows/test.yml"><img src="https://github.com/NIRVANA-APOC/dsh-api-cost/actions/workflows/test.yml/badge.svg" alt="tests"></a>
@@ -12,165 +12,148 @@
 
 ---
 
-DeepSeek prices its official API by time of day: weekday working hours in Beijing time are **peak** (double price), and everything else — nights, weekends, Chinese statutory holidays — is **off-peak**. DSH itself shows token counts, not money. This plugin turns those tokens into money, without touching a single request.
+`dsh-api-cost` 2.0 is a **TypeScript, projection-first** rewrite. Instead of metering streams, replaying logs and polling on a timer, the plugin registers one pure session projection; the Harness owns the event drive, the per-session watermark, the durable checkpoint and the delivery to the browser. The client half reads the host's own projection through the framework `useProjection` seat.
 
-Three things make the figure worth trusting. It prices against the **statutory-holiday and makeup-workday calendar**, so a holiday Monday is not billed at peak. It **replays the session logs by itself** on the first read of a conversation — idempotently, keyed by `turn:step` — so opening one from the sidebar, or coming back to it after a restart, shows the calls it already made instead of zero. And it **attributes delegated work** instead of hiding it: subagent and agent-team spend rolls into the session that started it, split into `this session` and `subsessions ×N`.
+What that buys you:
 
-It is deliberately small: **no runtime dependencies, no build step, no database** — two source files and a pricing table, with the UI built on nothing but the host's own platform seeds.
+- **Correct history without a recount button** — the first read of a session, a resumed conversation, or a restart all fold from the durable log through the host's checkpoint cache, so a figure never starts at ¥0 and never double counts.
+- **Real settlement semantics** — one billed event per `assistant/message` (or `assistant/attempt` fallback), priced at the *event's* own settlement time, with fork-inherited prefixes excluded from a child's own spend.
+- **Honest delegation and team totals** — `self`, `tree` and `team` scopes resolved from durable subagent catalogs and the team roster, with `own` always meaning *this session* and `others = total − own`.
+- **Lightweight by construction** — no replay framework, no database, no polling loop. Built artifacts: client ≈ **9.6 KiB gzip**, host ≈ **10.3 KiB gzip**.
 
-**Contents:** [Features](#features) · [Install](#install) · [Usage](#usage) · [Screenshots](#screenshots) · [Pricing](#pricing) · [Configuration](#configuration) · [Limitations](#limitations) · [Development](#development) · [Contributing](#contributing) · [License](#license)
+**Contents:** [Requirements](#requirements) · [Install](#install) · [Usage](#usage) · [HTTP](#http) · [Rates](#rates) · [Configuration](#configuration) · [What it does not promise](#what-it-does-not-promise) · [Development](#development) · [Migrating from 1.x](#migrating-from-1x) · [License](#license)
 
-## Features
+## Requirements
 
-- **A pill under the composer** — what this conversation has cost so far, in CNY and USD, plus the tier in force right now.
-- **An anchored detail panel** — countdown to the next tier switch, the peak / off-peak split, token buckets (cache hit, cache miss, output), per-model spend, and the calls still in flight.
-- **Priced at settlement time** — every model call is priced at the tier in force when it settled, so a conversation that crosses a boundary books the two tiers separately instead of pricing the whole thing at one rate.
-- **Subagents and agent teams roll up** — delegated work counts towards the session that started it, and the panel splits the total into "this session" and "subsessions ×N".
-- **History without being asked** — the first time a conversation is read, its durable log is replayed, so an opened or resumed session already includes the calls that settled before the plugin loaded. Replay is idempotent (keyed by `turn:step`), and the panel's recount button can always be pressed again without double-counting.
-- **Three surfaces, one set of figures** — the `/cost` command, the `session_cost` tool, and a plain GET JSON snapshot.
-- **Zero runtime dependencies** — no build step and no bundler; the UI is built on the host's platform seeds only.
+- DeepSeek Harness **0.2.0-rc.2** with the `sessionProjections`, `sessionProjectionCache` and `sessionQuery` capabilities mounted (the shipped `web` and `desktop` profiles have them).
+- Node.js **24** or newer for development only; the published package ships prebuilt JavaScript.
+
+The plugin declares those services in `inject`, so in a composition without them it stays inactive rather than half-working.
 
 ## Install
 
 ```sh
-dsh plugin --profile web add dsh-api-cost            # from npm
-dsh plugin --profile web add /absolute/path/to/repo  # from a checkout or a git URL
+dsh plugin --profile web add dsh-api-cost                # from npm
+dsh plugin --profile web add /absolute/path/to/checkout  # from a checkout or a git URL
 ```
 
-The Host half (metering, `/cost`, `session_cost`, HTTP snapshot) starts immediately. The Client half (the pill) is composed into the boot manifest, so **restart DSH once** to see it.
+The package ships `dist/index.js` (ESM host) and `dist/client.js` (the lazy browser factory), so **installation never runs a compiler**. A local source checkout must be built once with `pnpm build` before it is installed that way.
 
-Developed and tested against DeepSeek Harness 0.2.0-rc.2. The profile loader must understand `dsh.bundle` bundles — that is what `package.json` declares here, together with the `cordis.patch.yml` beside it.
+Host-side features (the projection, `/cost`, `session_cost`, the HTTP reads) take effect immediately. The composer pill appears once the client bundle is composed at startup, so restart DSH once.
 
 ## Usage
 
 ### The pill
 
-A pill sits in the composer dock, alongside the built-in session-stats and token-usage pills. It shows two things:
+Beside the shipped session-stats pills, the cost pill shows this session's estimated spend and the period in force (**peak** / **off-peak** spelled out in words, never colour alone). It reads the host projection directly, so it repaints when a settlement lands — not on a timer. A `Partial` marker appears whenever any contributing session is unpriced, truncated or unreadable.
 
-- what this conversation has cost so far, in CNY and USD;
-- the tier in force — `峰` peak or `谷` off-peak, in words and following the UI language, not signalled by colour alone.
+### The panel
 
-During peak hours the pill switches to a warning colour, so a long task started at 10:00 looks different from one started at 20:00.
+Clicking the pill (or pressing Enter on it) opens a trigger-anchored dialog: totals, the this-session / other-session split, the peak / off-peak split, token buckets, per-model breakdown, coverage, current rates, the countdown to the next period change, and a **Refresh** button that re-reads the scope instead of replaying logs.
 
-### The detail panel
+### Scopes
 
-Click the pill (or press Enter on it) to open a panel directly above it; click outside or press Escape to close it.
-
-- The current tier, why it applies (weekend, statutory holiday, makeup workday), and a countdown to the next switch
-- The total, in CNY and USD
-- This session vs. subsessions, and the peak / off-peak split
-- Any calls still in flight
-- Token buckets: cache hit, cache miss, output
-- Per-model spend
-- The rates in force right now
-
-### Subagents and agent teams
-
-Delegated work is attributed to the session that started it: the pill and the panel report the whole delegation tree and split it into `of which this session` and `of which subsessions ×N`, so a shared total never looks like it came from nowhere. Multi-level delegation accumulates.
-
-Attribution comes from the session's own `parentSession` (`session/created`), with `subagent/start` as a fallback, so a child that never announces a header still lands under its parent.
-
-A session that is a Team member reports the whole team by default, with the Lead marked ★, so any seat can see what the team is spending. Membership is read from the host's Agent Teams service (`tryMembership()` / `listMembers()`), not from a list the plugin maintains.
-
-The scope can be pinned per request: `auto` (Team → delegation tree → self), `team`, `tree`, or `self`.
+| Scope | Meaning |
+| --- | --- |
+| `auto` (default) | The verified team when the session is a team member, otherwise its delegation tree. |
+| `self` | This session only. |
+| `tree` | This session plus every durable subagent descendant. |
+| `team` | The whole team: lead, members and their descendants. Refused when membership cannot be verified. |
 
 ### Command and tool
 
 | Surface | Behaviour |
 | --- | --- |
-| `/cost [sessionId]` | Prints the same summary, with the current tier and rates. |
-| `session_cost` | Lets the model read a session's cost; omit the id to report the current conversation. |
+| `/cost [sessionId] [auto\|self\|tree\|team]` | Prints the same summary the pill shows, including coverage warnings. |
+| `session_cost` | Lets the assistant read a session's estimate; defaults to the calling session. |
 
-### HTTP API
+## HTTP
 
-All routes are GET-only, and deliberately live outside `/api` — that bridge belongs to the connection layer and enforces its request trust policy, answering a plain page GET with 401:
+Two GET-only routes on fixed paths, with no configuration knob:
 
 | Route | Returns |
 | --- | --- |
-| `/dsh-api-cost/api?session=<id>[&scope=auto\|tree\|team\|self][&force=1]` | Full snapshot |
-| `/dsh-api-cost/api/session?session=<id>` | One session's ledger |
-| `/dsh-api-cost/api/status` | Current tier, rate card and the next boundary |
-| `/dsh-api-cost/api/reconcile?session=<id>&scope=…` | Replays the session logs and returns the recount report (`scope=corpus` scans every session) |
+| `/dsh-api-cost/v2/view?session=<id>[&scope=…][&detail=summary\|full][&force=1]` | The unified cost view (ETag; `If-None-Match` answers `304`). |
+| `/dsh-api-cost/v2/pricing` | Current period, next transition, rate card and provenance. |
 
-## Screenshots
+`detail=summary` omits the per-model, roster and recent-call payloads. Non-GET methods answer `405`; unknown parameters, scopes or details answer `400`; an unknown session answers `404`; a cross-site fetch is refused with `403`; a read that outlives its 8-second budget answers `503`. Responses never carry local paths.
 
-The composer pill in both tiers, and the detail panel it opens — the labels follow the app's language:
+## Rates
 
-| Off-peak | Peak |
-| --- | --- |
-| ![The composer pill in the off-peak tier: the session cost in CNY with the tier beside it, drawn in the neutral colour](assets/pill-off-peak.png) | ![The same pill during peak hours, drawn in the warning colour, with the tier spelled out beside the amount](assets/pill-peak.png) |
+Published DeepSeek prices, in force from 2026-09-10 12:00 +08:00 (CNY per million tokens):
 
-![The detail panel: the session total in CNY and USD, the current tier with a countdown to the next switch, the peak / off-peak split, the rates in force, and the recount button](assets/panel-session.png)
-
-![The same panel for an agent team: the total split into "of which this session" and "of which team members", with the roster below and the Lead marked with a star](assets/panel-team.png)
-
-## Pricing
-
-Rates are DeepSeek's published card, effective 2026-09-10 12:00 +08:00, in CNY per million tokens:
-
-| Model | Tier | Cache hit | Cache miss | Output |
+| Model | Period | Cache hit | Cache miss | Output |
 | --- | --- | --- | --- | --- |
 | `deepseek-flash` | peak | 0.04 | 2 | 8 |
 | `deepseek-flash` | off-peak | 0.02 | 1 | 4 |
 | `deepseek-v4-pro` | peak | 0.30 | 9 | 27 |
 | `deepseek-v4-pro` | off-peak | 0.15 | 4.5 | 13.5 |
 
-The USD figure comes from DeepSeek's own USD price column, not from a converted exchange rate.
-
-**Tiers** (Beijing time, UTC+8, no daylight saving): peak is Monday–Friday 09:00–12:00 and 14:00–18:00, excluding Chinese statutory holidays. Everything else — nights, weekends, holidays and makeup workdays — is off-peak, at half the peak price. Boundaries are half-open, so 12:00 and 18:00 sharp are off-peak. The built-in holiday and makeup-workday calendar covers 2025 and 2026; a year it does not cover is priced as off-peak and labelled that way rather than guessed at.
+The published USD column is billed as its own column, never converted at a guessed rate. Peak windows are Monday–Friday 09:00–12:00 and 14:00–18:00 Beijing time, excluding statutory holidays; nights, weekends, holidays and 调休 makeup days are off-peak. Money accumulates in exact integer arithmetic (nano-units) and only rounds for display. Years missing from the holiday table resolve **off-peak** and are reported as `holiday-data-missing`.
 
 ## Configuration
 
-Override the plugin's row in your profile patch:
+In the profile patch:
 
 ```yaml
 - id: dsh-api-cost
   name: 'dsh-api-cost'
   config:
-    routePrefix: /dsh-api-cost/api   # only if the path collides
-    tree: true                       # subsessions count towards the session that started them
-    team: true                       # a Team member reports the whole team by default
-    holidays: {}                     # add future years, or correct one
-    autoRecount: true                # replay a session's log the first time it is read
-    tool: true                       # register the session_cost tool
-    command: true                    # register /cost
+    defaultScope: auto          # auto | self | tree | team
+    tool: true                  # register session_cost
+    command: true               # register /cost
+    holidays:                   # extend or correct the bundled Chinese calendar
+      '2027':
+        holidays: ['2027-01-01', ['2027-02-05', '2027-02-11']]
+        makeupWorkdays: ['2027-02-20']
 ```
 
-To report a session without its delegation tree, ask for it directly: `GET /dsh-api-cost/api?session=<id>&tree=0`, or turn `tree` off in the configuration above.
+Changing `holidays` changes the projection's fold identity, so stale checkpoints are discarded and rebuilt instead of being mixed with new money.
 
-## Limitations
+## What it does not promise
 
-- **It is an estimate, not a bill.** It prices the tokens the model reports against the published card, so credits, discounts and retry behaviour are invisible to it.
-- **Only DeepSeek's official card is priced.** Other providers and third-party routers are reported as unknown models at cost 0 rather than guessed at.
-- **It counts what settles while it is loaded**, and replays the durable log the first time a conversation is read — a resumed conversation is priced from its log rather than from zero. If a log cannot be read, the panel's recount button says so instead of pretending to succeed.
-- **Subsession attribution depends on the runtime.** Delegations that ended before the plugin loaded, and were never recorded, cannot be recovered afterwards.
-- **The card is maintained by hand.** A price change needs `lib/pricing.mjs` updated and a restart.
-- **`deepseek-v4-pro` routing is disputed** — whether calls after 2026-09-14 12:00 are routed to Flash and billed as Flash. The plugin prices it as Pro and flags the conflict in the snapshot's `routingDisputed` field rather than silently choosing a side.
-- **A call that straddles a boundary** is priced at the tier in force when it settled; it is not split by duration, which DeepSeek does not specify.
-
-Estimates that fall outside the card — calls older than the effective date, a year missing from the holiday calendar, the routing conflict above — do not take up panel space; the Host still reports the matching fields (`holidayDataMissing`, `beforeCurrentCard`, `routingDisputed`, plus the card's source and effective date) in `GET /dsh-api-cost/api`.
+- **It is an estimate, not a bill.** Only published rates and reported token counts are used; grants, discounts, retry billing and third-party routing are invisible here.
+- **Only official DeepSeek models are priced.** An unknown id is recorded as `unknown-model` with zero money rather than guessed.
+- **A settlement is billed at its settlement time.** A call that crosses a boundary is not split proportionally, because the official documentation defines no such split.
+- **Unreadable sessions are reported, not guessed**: they appear as `session-unavailable` with `coverage.status = partial`, and a traversal that exceeds the 400-session budget is marked `scope-truncated`.
+- **A malformed usage report is never billed.** The call is counted as an attempt and flagged `invalid-usage` or `missing-usage`, but it adds no money and no tokens, so a total never contains spend that no priced call explains.
+- **Fork semantics are explicit**: a forked child's own figure excludes the inherited prefix, so ancestors are not billed twice when you look at a branch.
 
 ## Development
 
 ```sh
-npm test        # node --test — 124 tests, no dependencies to install
+pnpm install --ignore-scripts     # dev-only toolchain
+pnpm typecheck                    # strict TypeScript over src, test and scripts
+pnpm build                        # dist/index.js, dist/client.js, dist/types
+pnpm test                         # builds, then runs the Node suite over *.test.ts
+pnpm bench                        # lightweight-adherence budgets (fails on regression)
 ```
 
 | Path | Role |
 | --- | --- |
-| `index.mjs` | Host half: meters model calls, prices them at settlement, keeps the ledger, serves the HTTP routes, registers the tool and the command |
-| `client.js` | Client half: the composer pill and the detail panel |
-| `lib/pricing.mjs` | Rate card, peak / off-peak calendar and the pricing functions (pure, zero-dependency) |
-| `test/` | 124 tests over pricing, the host ledger and the client bundle |
-| `cordis.patch.yml` | The bundle patch that inserts the plugin row |
+| `src/pricing/` | Rate card, holiday calendar, exact BigInt pricing engine. |
+| `src/host/projection.ts` | The pure `apiCost` fold and its wire schema. |
+| `src/host/query.ts` | Scope resolution, single-flight aggregation, bounded caches. |
+| `src/host/http.ts` | The two GET routes, validation and the error taxonomy. |
+| `src/client/` | TSX pill and panel, projection seats, one shared cross-session bridge. |
+| `test/` | Node-native TypeScript tests: pricing, client bridge, release contract, host integration. |
+| `scripts/build.ts` | esbuild host/client plus declaration emission. |
+| `docs/baseline.json` | Recorded 1.0.0 measurements the budget gate compares against. |
 
-The client bundle registers itself with `window.__ModuleLoader__.load({ id: <package name> })`. That id **must equal the package name**: the combo route serves every client bundle as a single script, so a bundle that registers under the wrong key fails the whole response. `test/client.test.mjs` reads the expected id from `package.json`, which is why a rename cannot silently drift past it.
+Measured on Node 24.21 against the recorded 1.0.0 baseline and the same fixtures: 100k settlements price in **12 ms** (was 22.7 ms), a 71-session historical tree aggregates completely in **1.4 ms** cold and **0.05 ms** warm, per-session projection state stays under **6 KiB** after 100k settlements, and the shipped bundles are **9.6 KiB** (client) and **10.3 KiB** (host) gzip.
 
-The Host bills the same durable events a recount reads: the live `session/event` feed and the log replay go through one fold, keyed by the call's `turn:step` position. That is why the running figure and a recount agree, and why a call that reaches both paths is counted once. A usage report whose position is unknown — a stream chunk whose `start` frame this process never saw — is left to the append feed rather than folded onto a shared key, which is what once collapsed every call of a session into a single entry.
+## Migrating from 1.x
 
-## Contributing
+2.0 is a deliberate breaking release: no legacy routes, parameters, configuration keys or data shapes are kept.
 
-Issues and pull requests are welcome. Run `npm test` before opening one — the suite is the contract for the pricing engine, the ledger and the client bundle.
+| 1.x | 2.0 |
+| --- | --- |
+| `GET /dsh-api-cost/api`, `/api/session`, `/api/status`, `/api/reconcile` | `GET /dsh-api-cost/v2/view`, `/v2/pricing` |
+| `tree=0`, `scope=corpus`, `force` on every route | `scope=self\|tree\|team`, `force=1` on `/view` |
+| `routePrefix` configuration | fixed `/dsh-api-cost/v2` |
+| Plugin-side log replay, LRU ledgers, recount button | Host projection, durable checkpoint, Refresh |
+| Plain-number money | Exact decimal strings folded from BigInt nano-units |
+| `index.mjs`, `client.js`, `lib/pricing.mjs` | `src/**/*.ts(x)` compiled to `dist/` |
 
 ## License
 

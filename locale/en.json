@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "API cost",
-    "description": "Real-time DeepSeek API cost with peak / off-peak rates, shown below the composer in CNY and USD."
+    "description": "DeepSeek cost estimate with peak / off-peak rates, durable checkpoint recovery and delegation/team attribution."
   }
 }

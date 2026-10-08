@@ -1,8 +1,21 @@
-# dsh-api-cost — DeepSeek API cost meter with peak / off-peak rates.
+# dsh-api-cost 2.0 — DeepSeek cost estimation with peak / off-peak rates.
 #
-# One Host row: it meters every model call and serves the pricing + ledger
-# snapshot the bundled Client widget renders. Install with plugin_manager
-# install_bundle (or `dsh plugin --profile web add dsh-api-cost`).
+# One Host row. It registers the pure `apiCost` session projection (the Harness
+# owns event drive, watermarks and durable checkpoints), serves the two GET
+# routes the bundled Client widget reads, and registers the `session_cost` tool
+# and the `/cost` command. Required capabilities: sessionProjections and
+# sessionQuery; webServer, tools and commands are used when present.
+#
+# Install with plugin_manager install_bundle (or `dsh plugin --profile web add dsh-api-cost`).
+#
+# Config (all optional):
+#   defaultScope: auto | self | tree | team
+#   tool: false            # skip the session_cost tool
+#   command: false         # skip the /cost command
+#   holidays:              # extend or correct the bundled Chinese holiday calendar
+#     '2027':
+#       holidays: ['2027-01-01', ['2027-02-05', '2027-02-11']]
+#       makeupWorkdays: ['2027-02-20']
 - insert:
     - id: dsh-api-cost
       name: 'dsh-api-cost'

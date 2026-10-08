@@ -1,56 +1,62 @@
 {
   "name": "dsh-api-cost",
-  "version": "1.0.0",
-  "description": "Real-time DeepSeek API cost meter with peak / off-peak rates: a pill under the composer, a /cost command, a session_cost tool and a JSON snapshot, with subagent and agent-team spend rolled into the session that started them.",
+  "version": "2.0.0",
+  "description": "Lightweight DeepSeek cost projections: exact peak/off-peak estimates, durable checkpoint recovery and correctly attributed delegation/team spend.",
   "type": "module",
   "license": "MIT",
   "author": "NIRVANA-APOC",
-  "keywords": [
-    "dsh",
-    "dsh-plugin",
-    "deepseek-harness",
-    "deepseek",
-    "cost",
-    "pricing",
-    "usage",
-    "peak-off-peak"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/NIRVANA-APOC/dsh-api-cost.git"
-  },
+  "keywords": ["dsh", "dsh-plugin", "deepseek-harness", "deepseek", "cost", "pricing", "typescript"],
+  "repository": { "type": "git", "url": "git+https://github.com/NIRVANA-APOC/dsh-api-cost.git" },
   "homepage": "https://github.com/NIRVANA-APOC/dsh-api-cost#readme",
-  "bugs": {
-    "url": "https://github.com/NIRVANA-APOC/dsh-api-cost/issues"
-  },
+  "bugs": { "url": "https://github.com/NIRVANA-APOC/dsh-api-cost/issues" },
   "icon": "./icon.svg",
-  "main": "./index.mjs",
+  "main": "./dist/index.js",
+  "types": "./dist/types/host/index.d.ts",
   "exports": {
-    ".": "./index.mjs",
-    "./client": "./client.js",
+    ".": { "types": "./dist/types/host/index.d.ts", "default": "./dist/index.js" },
+    "./client": { "types": "./dist/types/client/index.d.ts", "default": "./dist/client.js" },
     "./package.json": "./package.json",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json"
   },
-  "files": [
-    "index.mjs",
-    "client.js",
-    "lib/pricing.mjs",
-    "cordis.patch.yml",
-    "icon.svg",
-    "locale/*.json",
-    "README.md",
-    "README.zh.md"
-  ],
+  "files": ["dist", "cordis.patch.yml", "icon.svg", "locale/*.json", "README.md", "README.zh.md"],
+  "engines": { "node": ">=24" },
+  "peerDependencies": { "@deepseek-ai/dsh": "0.2.0-rc.2", "@deepseek-ai/cordis": "~4.0.4", "zod": "^4.4.3" },
   "dsh": {
-    "bundle": {
-      "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "platform": "web"
-    }
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web", "inject": ["@deepseek-ai/dsh-client-ui-session", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-chat"] }
   },
   "scripts": {
-    "test": "node --test"
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.ts",
+    "test": "node scripts/build.ts && node --test --test-isolation=none --test-concurrency=1 test/*.test.ts",
+    "bench": "node scripts/bench.ts",
+    "check": "pnpm typecheck && pnpm test && pnpm bench"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "esbuild": "~0.25.12",
+    "@types/node": "^24.0.0",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.0",
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-agent": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session-projection-cache": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session-query": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-subagent": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-experimental-agent-team": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-store": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-chat": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-locale": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-commands": "0.2.0-rc.2",
+    "zod": "^4.4.3"
   }
 }

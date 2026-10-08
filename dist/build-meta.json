@@ -1,0 +1,24 @@
+{
+  "hostInputs": [
+    "src/pricing/index.ts",
+    "src/shared/contracts.ts",
+    "src/host/projection.ts",
+    "src/host/query.ts",
+    "src/host/http.ts",
+    "src/host/index.ts"
+  ],
+  "clientInputs": [
+    "src/client/styles.ts",
+    "src/client/locale.ts",
+    "src/shared/format.ts",
+    "src/client/transport.ts",
+    "src/client/store.ts",
+    "src/client/widgets.tsx",
+    "src/client/index.ts"
+  ],
+  "clientExternal": [
+    "react",
+    "react-dom",
+    "react/jsx-runtime"
+  ]
+}

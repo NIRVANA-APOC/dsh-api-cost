@@ -1,4 +1,7 @@
 node_modules/
+.pnpm-store/
+*.tgz
+*.tsbuildinfo
 npm-debug.log*
 *.log
 

@@ -13,5 +13,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      # The plugin has zero dependencies, so there is nothing to install.
-      - run: node --test
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm bench
+      - run: git diff --exit-code -- dist
+      - run: pnpm pack --pack-destination .
