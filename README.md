@@ -1,6 +1,6 @@
 <h1 align="center">dsh-api-cost</h1>
 
-<p align="center">Exact DeepSeek cost estimation for DeepSeek Harness: peak / off-peak rates, durable checkpoint recovery, and delegation or team spend attributed to the session that caused it.</p>
+<p align="center">DeepSeek cost estimation for DeepSeek Harness: peak / off-peak rates, delegation or team spend attributed to the session that caused it, folded by the host's session projections.</p>
 
 <p align="center">
   <a href="https://github.com/NIRVANA-APOC/dsh-api-cost/actions/workflows/test.yml"><img src="https://github.com/NIRVANA-APOC/dsh-api-cost/actions/workflows/test.yml/badge.svg" alt="tests"></a>
@@ -19,7 +19,7 @@ What that buys you:
 - **Correct history without a recount button** — the first read of a session, a resumed conversation, or a restart all fold from the durable log through the host's checkpoint cache, so a figure never starts at ¥0 and never double counts.
 - **Real settlement semantics** — one billed event per `assistant/message` (or `assistant/attempt` fallback), priced at the *event's* own settlement time, with fork-inherited prefixes excluded from a child's own spend.
 - **Honest delegation and team totals** — `self`, `tree` and `team` scopes resolved from durable subagent catalogs and the team roster, with `own` always meaning *this session* and `others = total − own`.
-- **Lightweight by construction** — no replay framework, no database, no polling loop. Built artifacts: client ≈ **9.3 KiB gzip**, host ≈ **10.3 KiB gzip**.
+- **Lightweight by construction** — no replay framework, no database, no own polling loop. Built artifacts: client ≈ **9.3 KiB gzip**, host ≈ **10.3 KiB gzip**.
 
 **Contents:** [Requirements](#requirements) · [Install](#install) · [Usage](#usage) · [HTTP](#http) · [Rates](#rates) · [Configuration](#configuration) · [What it does not promise](#what-it-does-not-promise) · [Development](#development) · [Migrating from 1.x](#migrating-from-1x) · [License](#license)
 

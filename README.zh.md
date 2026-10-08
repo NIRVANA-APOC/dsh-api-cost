@@ -1,6 +1,6 @@
 <h1 align="center">dsh-api-cost</h1>
 
-<p align="center">DeepSeek Harness 的精确成本估算：峰谷计价、宿主检查点恢复，以及归集到发起会话的委派与团队花费。</p>
+<p align="center">DeepSeek Harness 的 DeepSeek 成本估算：峰谷计价、归集到发起会话的委派与团队花费，由宿主会话投影折叠得出。</p>
 
 <p align="center">
   <a href="https://github.com/NIRVANA-APOC/dsh-api-cost/actions/workflows/test.yml"><img src="https://github.com/NIRVANA-APOC/dsh-api-cost/actions/workflows/test.yml/badge.svg" alt="tests"></a>
@@ -19,7 +19,7 @@
 - **历史不用手动补，也不会重复计** —— 第一次读取某个会话、恢复旧会话或重启之后再进来，都是从持久日志经宿主检查点缓存折叠得出，不会从 ¥0 起算，也不会翻倍。
 - **真实的结算语义** —— 每个 `assistant/message`（缺失时回退到 `assistant/attempt`）计一次，按事件**自身结算时刻**定价，fork 继承的前缀不计入子会话自身花费。
 - **如实交代委派与团队** —— `self`、`tree`、`team` 三个范围分别由持久子智能体目录与团队名单解析；`own` 永远指**本会话**，`others = total − own`。
-- **结构上就轻** —— 没有重放框架、没有数据库、没有轮询循环。产物体积：客户端约 **9.3 KiB gzip**，宿主约 **10.3 KiB gzip**。
+- **结构上就轻** —— 没有重放框架、没有数据库、没有自有轮询循环。产物体积：客户端约 **9.3 KiB gzip**，宿主约 **10.3 KiB gzip**。
 
 **目录：** [运行要求](#运行要求) · [安装](#安装) · [用法](#用法) · [HTTP](#http) · [费率](#费率) · [配置](#配置) · [它不承诺什么](#它不承诺什么) · [开发](#开发) · [从 1.x 迁移](#从-1x-迁移) · [许可](#许可)
 

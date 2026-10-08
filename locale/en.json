@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "API cost",
-    "description": "DeepSeek cost estimate with peak / off-peak rates, durable checkpoint recovery and delegation/team attribution."
+    "description": "DeepSeek cost estimate with peak / off-peak rates and delegation/team attribution, driven by the host's session projections and durable checkpoints."
   }
 }

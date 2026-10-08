@@ -1,7 +1,7 @@
 {
   "name": "dsh-api-cost",
   "version": "2.0.0",
-  "description": "Lightweight DeepSeek cost projections: exact peak/off-peak estimates, durable checkpoint recovery and correctly attributed delegation/team spend.",
+  "description": "DeepSeek cost estimates as a session projection: peak/off-peak rates and delegation/team spend attributed to the session that caused it.",
   "type": "module",
   "license": "MIT",
   "author": "NIRVANA-APOC",
@@ -21,7 +21,7 @@
   },
   "files": ["dist", "cordis.patch.yml", "icon.svg", "locale/*.json", "README.md", "README.zh.md"],
   "engines": { "node": ">=24" },
-  "peerDependencies": { "@deepseek-ai/dsh": "0.2.0-rc.2", "@deepseek-ai/cordis": "~4.0.4", "zod": "^4.4.3" },
+  "peerDependencies": { "@deepseek-ai/dsh": ">=0.2.0-rc.2 <0.3.0-0", "@deepseek-ai/cordis": ">=4.0.4 <5.0.0-0", "zod": "^4.4.3" },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": { "platform": "web", "inject": ["@deepseek-ai/dsh-client-ui-session", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-chat"] }
