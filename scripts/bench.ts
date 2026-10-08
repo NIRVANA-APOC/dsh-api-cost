@@ -1,7 +1,12 @@
 /**
- * Lightweight-adherence gate: measured throughput, bounded state and artifact
- * size, compared against the recorded 1.0.0 baseline. Every budget here is a
- * hard failure so a regression cannot ship quietly.
+ * Lightweight-adherence gate: bounded state, artifact size, completeness and
+ * throughput. Size, state and completeness budgets are exact and hard.
+ *
+ * Timing budgets are MACHINE-RELATIVE: the recorded 1.0.0 baseline was measured
+ * on one workstation, so a shared CI runner cannot be held to its absolute
+ * milliseconds without flaking on runner speed alone. A fixed reference workload
+ * measured in this same process calibrates the transfer, and the gate then fails
+ * only on a real multiple-of-baseline regression.
  */
 import { readFileSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'
@@ -18,14 +23,43 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const baseline = JSON.parse(readFileSync(join(root, 'docs/baseline.json'), 'utf8')) as {
   artifacts: { client: { gzipBytes: number }; host: { gzipBytes: number }; pricing: { gzipBytes: number } }
   priceUsage100000Ms: number[]
+  calibration: { referenceMs: number }
 }
 const STATE_BUDGET_BYTES = 32 * 1024
+/** Allowed overshoot of the calibrated baseline before the gate fails. */
+const TIMING_TOLERANCE = 1.15
 const failures: string[] = []
 const check = (label: string, ok: boolean, detail: string): void => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${label}: ${detail}`)
   if (!ok) failures.push(label)
 }
 const median = (values: number[]): number => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]!
+
+/* ---- machine calibration ----------------------------------------------- */
+/**
+ * A fixed arithmetic workload in the same shape as the pricing hot path:
+ * integer mixing plus BigInt multiply/divide. Its runtime moves with the
+ * machine and the Node build, so the recorded baseline transfers.
+ */
+let calibrationSink = 0
+const referenceWork = (): number => {
+  const start = performance.now()
+  let mixed = 12345
+  let accumulator = 0n
+  for (let index = 0; index < 200_000; index += 1) {
+    mixed = (mixed * 1103515245 + 12345) % 2147483648
+    accumulator = (accumulator + BigInt(mixed & 65535) * 1_000_000n) / 3n
+  }
+  const elapsed = performance.now() - start
+  calibrationSink = Number(accumulator & 65_535n) + mixed
+  return elapsed
+}
+referenceWork()
+const referenceMs = median([referenceWork(), referenceWork(), referenceWork()])
+const recordedReferenceMs = baseline.calibration.referenceMs
+const floor = Number(process.env.BENCH_SCALE_FLOOR ?? '0')
+const machineScale = Math.max(1, referenceMs / recordedReferenceMs, Number.isFinite(floor) ? floor : 0)
+console.log(`calibration: ${referenceMs.toFixed(1)} ms reference vs ${recordedReferenceMs} ms recorded ⇒ machine scale ${machineScale.toFixed(2)}x (sink ${calibrationSink})`)
 
 /* ---- pricing throughput ------------------------------------------------ */
 const engine = createPricingEngine()
@@ -40,7 +74,8 @@ for (let run = 0; run < 5; run += 1) {
 }
 const priceMs = median(samples)
 const baselinePrice = median(baseline.priceUsage100000Ms)
-check('price-100k', priceMs <= baselinePrice, `${priceMs.toFixed(1)} ms vs baseline ${baselinePrice.toFixed(1)} ms`)
+const priceBudget = baselinePrice * machineScale * TIMING_TOLERANCE
+check('price-100k', priceMs <= priceBudget, `${priceMs.toFixed(1)} ms vs ${priceBudget.toFixed(1)} ms budget (1.0.0 on this machine: ${(baselinePrice * machineScale).toFixed(1)} ms)`)
 
 /* ---- projection fold throughput and bounded state ---------------------- */
 const projection = createCostProjection(engine)

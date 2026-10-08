@@ -126,7 +126,7 @@ pnpm install --ignore-scripts     # dev-only toolchain
 pnpm typecheck                    # strict TypeScript over src, test and scripts
 pnpm build                        # dist/index.js, dist/client.js, dist/types
 pnpm test                         # builds, then runs the Node suite over *.test.ts
-pnpm bench                        # lightweight-adherence budgets (fails on regression)
+pnpm bench                        # size/state budgets plus machine-calibrated timing budgets
 ```
 
 | Path | Role |

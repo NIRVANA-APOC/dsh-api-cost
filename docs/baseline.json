@@ -9,6 +9,11 @@
   },
   "priceUsage100000Ms": [26.0089, 20.4885, 22.9137, 22.6577, 21.3521],
   "nextBoundary10000Ms": 5.8404,
+  "calibration": {
+    "referenceMs": 3.44,
+    "workload": "200k iterations of LCG integer mixing plus BigInt multiply/divide (scripts/bench.ts referenceWork)",
+    "why": "Timing budgets are machine-relative: the gate scales this recorded baseline by the same workload re-measured in the run, so a shared CI runner is not held to workstation milliseconds."
+  },
   "additionalReproductions": {
     "historySkippedAfterLiveCall": { "expected": 2, "actual": 1 },
     "automaticLargeTree": { "sessions": 71, "expectedCalls": 71, "actualCalls": 64 },

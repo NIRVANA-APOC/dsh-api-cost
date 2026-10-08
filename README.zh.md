@@ -126,7 +126,7 @@ pnpm install --ignore-scripts     # 仅开发工具链
 pnpm typecheck                    # 对 src、test、scripts 做严格类型检查
 pnpm build                        # 产出 dist/index.js、dist/client.js、dist/types
 pnpm test                         # 先构建，再对 *.test.ts 跑 Node 测试
-pnpm bench                        # 轻量化预算门禁（回归即失败）
+pnpm bench                        # 体积/状态预算，加上按机器自校准的耗时预算
 ```
 
 | 路径 | 作用 |
