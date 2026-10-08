@@ -19,7 +19,7 @@ What that buys you:
 - **Correct history without a recount button** — the first read of a session, a resumed conversation, or a restart all fold from the durable log through the host's checkpoint cache, so a figure never starts at ¥0 and never double counts.
 - **Real settlement semantics** — one billed event per `assistant/message` (or `assistant/attempt` fallback), priced at the *event's* own settlement time, with fork-inherited prefixes excluded from a child's own spend.
 - **Honest delegation and team totals** — `self`, `tree` and `team` scopes resolved from durable subagent catalogs and the team roster, with `own` always meaning *this session* and `others = total − own`.
-- **Lightweight by construction** — no replay framework, no database, no polling loop. Built artifacts: client ≈ **9.6 KiB gzip**, host ≈ **10.3 KiB gzip**.
+- **Lightweight by construction** — no replay framework, no database, no polling loop. Built artifacts: client ≈ **9.2 KiB gzip**, host ≈ **10.3 KiB gzip**.
 
 **Contents:** [Requirements](#requirements) · [Install](#install) · [Usage](#usage) · [HTTP](#http) · [Rates](#rates) · [Configuration](#configuration) · [What it does not promise](#what-it-does-not-promise) · [Development](#development) · [Migrating from 1.x](#migrating-from-1x) · [License](#license)
 
@@ -49,7 +49,7 @@ Beside the shipped session-stats pills, the cost pill shows this session's estim
 
 ### The panel
 
-Clicking the pill (or pressing Enter on it) opens a trigger-anchored dialog: totals, the this-session / other-session split, the peak / off-peak split, token buckets, per-model breakdown, coverage, current rates, the countdown to the next period change, and a **Refresh** button that re-reads the scope instead of replaying logs.
+Clicking the pill (or pressing Enter on it) opens a trigger-anchored dialog: totals, the this-session / other-session split, the peak / off-peak split, the priced-call count, coverage, the team roster when the scope is a team, current rates, the countdown to the next period change, and a **Refresh** button that re-reads the scope instead of replaying logs. Token buckets and the per-model breakdown are deliberately not on the panel; they stay available through `/cost`, `session_cost` and `detail=full`.
 
 ### Scopes
 
@@ -140,7 +140,7 @@ pnpm bench                        # size/state budgets plus machine-calibrated t
 | `scripts/build.ts` | esbuild host/client plus declaration emission. |
 | `docs/baseline.json` | Recorded 1.0.0 measurements the budget gate compares against. |
 
-Measured on Node 24.21 against the recorded 1.0.0 baseline and the same fixtures: 100k settlements price in **12 ms** (was 22.7 ms), a 71-session historical tree aggregates completely in **1.4 ms** cold and **0.05 ms** warm, per-session projection state stays under **6 KiB** after 100k settlements, and the shipped bundles are **9.6 KiB** (client) and **10.3 KiB** (host) gzip.
+Measured on Node 24.21 against the recorded 1.0.0 baseline and the same fixtures: 100k settlements price in **12 ms** (was 22.7 ms), a 71-session historical tree aggregates completely in **1.4 ms** cold and **0.05 ms** warm, per-session projection state stays under **6 KiB** after 100k settlements, and the shipped bundles are **9.2 KiB** (client) and **10.3 KiB** (host) gzip.
 
 ## Migrating from 1.x
 

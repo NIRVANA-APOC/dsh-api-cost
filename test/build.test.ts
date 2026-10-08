@@ -89,6 +89,15 @@ test('the legacy JavaScript implementation is gone, not shadowed', () => {
   assert.equal(existsSync(join(root, 'lib')), false)
 })
 
+test('the shipped panel no longer carries the removed token and per-model rows', () => {
+  const text = read('dist/client.js')
+  const removed = ['detail.tokens', 'detail.cacheHit', 'detail.cacheMiss', 'detail.output', 'detail.reasoning', 'detail.byModel', 'detail.noModels', 'detail.unknownModel']
+  for (const key of removed) assert.equal(text.includes(key), false, `${key} must not ship once its row is gone`)
+  for (const kept of ['detail.peak', 'detail.offPeak', 'detail.calls', 'detail.sessions', 'detail.team']) {
+    assert.equal(text.includes(kept), true, `${kept} must still ship`)
+  }
+})
+
 test('the host artifact depends on nothing but Node builtins and its declared peer', () => {
   const text = read('dist/index.js')
   const specifiers = [...text.matchAll(/(?:from|import)\s*\(?\s*"([^"]+)"/g)].map(match => match[1]!)

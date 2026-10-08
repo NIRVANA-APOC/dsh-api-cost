@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom'
 import type { SessionListState, SessionSnapshot, UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { MaybeSnapshotSelectorHook, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-store'
 import type { Coverage, LedgerView, Money, PricingView, Totals } from '../shared/contracts.ts'
-import { countdownString, moneyString, tokenString } from '../shared/format.ts'
+import { countdownString, moneyString } from '../shared/format.ts'
 import { validCoverage, validTotals } from './transport.ts'
 import type { CostStore, ViewState } from './store.ts'
 import type { CostPillProps } from './types.ts'
@@ -143,7 +143,6 @@ function CostPanel(props: PanelProps) {
   const { panel, position } = usePanel(anchor, close)
   const projectedOwn = useProjection('apiCost', ownTotals)
   const projectedCoverage = useProjection('apiCost', ownCoverage)
-  const projectedModels = useProjection('apiCost', ledger => ledger?.byModel)
   useEffect(() => store.open(sessionId), [store, sessionId])
   const view = state.view
   const nativeOwn = projectedCoverage?.status !== 'unavailable' ? projectedOwn : undefined
@@ -151,7 +150,6 @@ function CostPanel(props: PanelProps) {
   const total = view?.scope === 'self' && nativeOwn ? nativeOwn : view?.coverage.status !== 'unavailable' ? view?.total : undefined
   const others = view?.coverage.status !== 'unavailable' ? view?.others : undefined
   const coverage = view?.scope === 'self' && projectedCoverage ? projectedCoverage : view?.coverage
-  const byModel = view?.scope === 'self' && nativeOwn ? projectedModels : view?.byModel
   return createPortal(<div ref={panel} id={id} role="dialog" aria-label={t('cost.title')} tabIndex={-1} className="dac-panel dac-panel--floating" style={position}>
     <div className="dac-title"><span className="dac-titleLabel"><CostMark />{t('cost.title')}</span><span className="dac-titleValue">{pairedMoney(total?.money)}</span></div>
     <div className="dac-rule" aria-hidden="true" />
@@ -164,12 +162,6 @@ function CostPanel(props: PanelProps) {
       <Row label={t('detail.calls')}>{total ? String(total.calls) : '—'}</Row>
       <Row label={t('detail.peak')}>{pairedMoney(total?.periods.peak)}</Row>
       <Row label={t('detail.offPeak')}>{pairedMoney(total?.periods.offPeak)}</Row>
-      <Row label={t('detail.tokens')}>{tokenString(total?.tokens.total)}</Row>
-      <Row label={t('detail.cacheHit')}>{tokenString(total?.tokens.cacheHit)}</Row>
-      <Row label={t('detail.cacheMiss')}>{tokenString(total?.tokens.cacheMiss)}</Row>
-      <Row label={t('detail.output')}>{tokenString(total?.tokens.output)}</Row>
-      <Row label={t('detail.reasoning')}>{tokenString(total?.tokens.reasoning)}</Row>
-      <Row label={t('detail.byModel')} wrap>{coverage?.status === 'unavailable' ? '—' : byModel?.length ? <div className="dac-roster">{byModel.map(model => <span key={model.model}>{model.model === 'unknown' ? t('detail.unknownModel') : model.model}: {pairedMoney(model.totals.money)} · {tokenString(model.totals.tokens.total)}</span>)}</div> : state.loading ? t('cost.loading') : t('detail.noModels')}</Row>
       {view?.scope === 'team' && <Row label={t('detail.team')} wrap>{view.members?.length ? <div className="dac-roster">{view.members.map(member => <span key={member.sessionId}>{member.role === 'lead' ? '★ ' : ''}{member.name}: {coverage?.status === 'unavailable' ? '—' : pairedMoney(member.money)}</span>)}</div> : state.loading ? t('cost.loading') : t('cost.unavailable')}</Row>}
       <PricingRows pricing={pricing} t={t} />
     </dl>
