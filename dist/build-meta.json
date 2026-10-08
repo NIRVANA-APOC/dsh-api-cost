@@ -13,6 +13,7 @@
     "src/shared/format.ts",
     "src/client/transport.ts",
     "src/client/store.ts",
+    "src/client/cardNotes.ts",
     "src/client/widgets.tsx",
     "src/client/index.ts"
   ],

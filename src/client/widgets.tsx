@@ -6,6 +6,7 @@ import type { MaybeSnapshotSelectorHook, SnapshotSelectorHook } from '@deepseek-
 import type { Coverage, LedgerView, Money, PricingView, Totals } from '../shared/contracts.ts'
 import { countdownString, moneyString } from '../shared/format.ts'
 import { validCoverage, validTotals } from './transport.ts'
+import { cardNotes } from './cardNotes.ts'
 import type { CostStore, ViewState } from './store.ts'
 import type { CostPillProps } from './types.ts'
 import type { LocaleKey, Translate } from './locale.ts'
@@ -117,8 +118,9 @@ function CoverageRows({ coverage, t }: { coverage: Coverage | undefined; t: Tran
     {coverage.issues.length > 0 && <Row label={t('cost.partial')} wrap>{coverage.issues.map(issue => t(`issue.${issue}`)).join(' · ')}</Row>}
   </>
 }
-function PricingRows({ pricing, t }: { pricing: PricingView | null; t: Translate }) {
+function PricingRows({ pricing, t, models }: { pricing: PricingView | null; t: Translate; models?: readonly string[] | undefined }) {
   if (!pricing) return <Row label={t('detail.period')}>{t('cost.unavailable')}</Row>
+  const notes = cardNotes(pricing.issues, models)
   return <>
     <Row label={t('detail.period')}>{t(pricing.peak ? 'tier.peak' : 'tier.offPeak')}</Row>
     {pricing.next && <Row label={t(pricing.next.peak ? 'tier.nextPeak' : 'tier.nextOffPeak')}><Countdown at={pricing.next.at} /></Row>}
@@ -126,9 +128,9 @@ function PricingRows({ pricing, t }: { pricing: PricingView | null; t: Translate
       const rates = (pricing.peak ? value.peak : value.offPeak).cny
       return <span key={model}>{value.label}: {rates.cacheHit} / {rates.cacheMiss} / {rates.output}</span>
     })}<span className="dac-actionNote">{t('detail.rateUnit')}</span></div></Row>
-    {/* A card-level caveat, deliberately NOT the coverage label: this rests on
-        the published rate card, not on this session's numbers. */}
-    {pricing.issues.length > 0 && <Row label={t('detail.cardNotes')} wrap>{pricing.issues.map(issue => t(`issue.${issue}`)).join(' · ')}</Row>}
+    {/* A card-level caveat, deliberately NOT the coverage label, and shown only
+        when it can move this scope's numbers (see cardNotes). */}
+    {notes.length > 0 && <Row label={t('detail.cardNotes')} wrap>{notes.map(issue => t(`issue.${issue}`)).join(' · ')}</Row>}
   </>
 }
 interface PanelProps extends CostPillProps {
@@ -167,7 +169,7 @@ function CostPanel(props: PanelProps) {
       <Row label={t('detail.peak')}>{pairedMoney(total?.periods.peak)}</Row>
       <Row label={t('detail.offPeak')}>{pairedMoney(total?.periods.offPeak)}</Row>
       {view?.scope === 'team' && <Row label={t('detail.team')} wrap>{view.members?.length ? <div className="dac-roster">{view.members.map(member => <span key={member.sessionId}>{member.role === 'lead' ? '★ ' : ''}{member.name}: {coverage?.status === 'unavailable' ? '—' : pairedMoney(member.money)}</span>)}</div> : state.loading ? t('cost.loading') : t('cost.unavailable')}</Row>}
-      <PricingRows pricing={pricing} t={t} />
+      <PricingRows pricing={pricing} t={t} models={view?.byModel?.map(model => model.model)} />
     </dl>
     <div className="dac-footer"><button type="button" className={'dac-action' + (state.loading ? ' dac-action--busy' : '')} disabled={state.loading} title={t('action.refreshHint')} onClick={() => { void store.refresh(sessionId, true) }}><RefreshMark />{t(state.loading ? 'action.refreshing' : 'action.refresh')}</button>{state.error && <span className="dac-actionNote dac-actionNote--error" role="alert">{state.error}</span>}</div>
   </div>, document.body)

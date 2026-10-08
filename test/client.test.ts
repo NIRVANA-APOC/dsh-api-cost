@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import { CostTransport, validCostView, validLedger, validPricingView } from '../src/client/transport.ts'
 import type { HttpResponse } from '../src/client/transport.ts'
 import { CostStore, PricingStore } from '../src/client/store.ts'
+import { cardNotes } from '../src/client/cardNotes.ts'
 import type { Scheduler, Visibility } from '../src/client/store.ts'
 
 /* ------------------------------------------------------------------ *
@@ -258,6 +259,24 @@ test('disposal aborts everything and refuses further work', async () => {
   assert.equal(fetch.calls[0]!.signal?.aborted, true)
   await assert.doesNotReject(() => store.refresh('session-a'))
   assert.equal(store.subscribe('session-a', () => {})(), undefined)
+})
+
+/* ------------------------------------------------------------------ *
+ * Rate-card notes
+ * ------------------------------------------------------------------ */
+
+test('a disputed-model note is shown only where that model is priced', () => {
+  const issues = ['routing-disputed'] as const
+  assert.deepEqual(cardNotes(issues, undefined), [], 'an unknown scope must not inherit a note about Pro')
+  assert.deepEqual(cardNotes(issues, ['deepseek-flash', 'unknown']), [], 'a session without Pro is not a Pro problem')
+  assert.deepEqual(cardNotes(issues, ['deepseek-flash', 'deepseek-v4-pro']), ['routing-disputed'])
+})
+
+test('calendar and card-epoch caveats survive regardless of the scope models', () => {
+  const issues = ['holiday-data-missing', 'before-rate-card', 'routing-disputed'] as const
+  assert.deepEqual(cardNotes(issues, []), ['holiday-data-missing', 'before-rate-card'], 'they shape the rates on display')
+  assert.deepEqual(cardNotes(issues, ['deepseek-v4-pro']), ['holiday-data-missing', 'before-rate-card', 'routing-disputed'])
+  assert.deepEqual(cardNotes([], undefined), [])
 })
 
 /* ------------------------------------------------------------------ *

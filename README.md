@@ -49,7 +49,7 @@ Beside the shipped session-stats pills, the cost pill shows this session's estim
 
 ### The panel
 
-Clicking the pill (or pressing Enter on it) opens a trigger-anchored dialog: totals, the this-session / other-session split, the peak / off-peak split, the priced-call count, coverage, the team roster when the scope is a team, current rates, a rate-card notes row when the published card itself carries a caveat, the countdown to the next period change, and a **Refresh** button that re-reads the scope instead of replaying logs. Token buckets and the per-model breakdown are deliberately not on the panel; they stay available through `/cost`, `session_cost` and `detail=full`.
+Clicking the pill (or pressing Enter on it) opens a trigger-anchored dialog: totals, the this-session / other-session split, the peak / off-peak split, the priced-call count, coverage, the team roster when the scope is a team, current rates, a rate-card notes row when the published card carries a caveat that affects this scope, the countdown to the next period change, and a **Refresh** button that re-reads the scope instead of replaying logs. Token buckets and the per-model breakdown are deliberately not on the panel; they stay available through `/cost`, `session_cost` and `detail=full`.
 
 ### Scopes
 
@@ -117,7 +117,7 @@ Changing `holidays` changes the projection's fold identity, so stale checkpoints
 - **A settlement is billed at its settlement time.** A call that crosses a boundary is not split proportionally, because the official documentation defines no such split.
 - **Unreadable sessions are reported, not guessed**: they appear as `session-unavailable` with `coverage.status = partial`, and a traversal that exceeds the 400-session budget is marked `scope-truncated`.
 - **A malformed usage report is never billed.** The call is counted as an attempt and flagged `invalid-usage` or `missing-usage`, but it adds no money and no tokens, so a total never contains spend that no priced call explains.
-- **The Pro routing caveat is a rate-card note, not a coverage gap.** Official billing for `deepseek-v4-pro` after 2026-09-14 12:00 +08:00 is disputed; the plugin keeps pricing it on the Pro card and reports that as a `Rate card notes` row, so a session whose own numbers are complete still reads as complete.
+- **The Pro routing caveat is a rate-card note, not a coverage gap.** This repository records that official billing for `deepseek-v4-pro` after 2026-09-14 12:00 +08:00 is disputed (whether those requests are served — and billed — as Flash, or keep the Pro column). The plugin cannot verify the provider's policy, so it prices the published Pro column and says so. That note appears **only when the scope actually priced that model**; other card caveats (missing holiday data, calls predating the card) always show, because they shape the rates and period on display.
 - **Fork semantics are explicit**: a forked child's own figure excludes the inherited prefix, so ancestors are not billed twice when you look at a branch.
 
 ## Development
