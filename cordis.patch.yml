@@ -1,10 +1,11 @@
 # dsh-api-cost 2.0 — DeepSeek cost estimation with peak / off-peak rates.
 #
 # One Host row. It registers the pure `apiCost` session projection (the Harness
-# owns event drive, watermarks and durable checkpoints), serves the two GET
-# routes the bundled Client widget reads, and registers the `session_cost` tool
-# and the `/cost` command. Required capabilities: sessionProjections and
-# sessionQuery; webServer, tools and commands are used when present.
+# owns event drive, watermarks and durable checkpoints), serves the three
+# routes the bundled Client widget reads and writes, registers the `session_cost`
+# tool and the `/cost` command, and installs the off-peak gate on the
+# `llm/stream` waterfall. Required capabilities: sessionProjections and
+# sessionQuery; webServer, tools, commands and llm are used when present.
 #
 # Install with plugin_manager install_bundle (or `dsh plugin --profile web add dsh-api-cost`).
 #
@@ -16,6 +17,11 @@
 #     '2027':
 #       holidays: ['2027-01-01', ['2027-02-05', '2027-02-11']]
 #       makeupWorkdays: ['2027-02-20']
+#   gate:                  # the off-peak request gate, off until the panel turns it on
+#     enabled: false       # initial state, used only when nothing is stored yet
+#     persist: true        # keep the switch position across restarts
+#     path: ...            # override the state file (<dsh home>/state/dsh-api-cost/gate.json)
+#     models: all | priced # hold every model call, or only ids the published card prices
 - insert:
     - id: dsh-api-cost
       name: 'dsh-api-cost'

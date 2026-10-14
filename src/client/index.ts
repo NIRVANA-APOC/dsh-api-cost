@@ -2,6 +2,7 @@ import { CSS } from './styles.ts'
 import { EN, ZH, fallbackTranslate } from './locale.ts'
 import type { Translate } from './locale.ts'
 import { CostStore } from './store.ts'
+import { GateStore } from './gate.ts'
 import { createCostPill } from './widgets.tsx'
 import type { ClientContext } from './types.ts'
 
@@ -35,6 +36,10 @@ export function apply(ctx: ClientContext): void {
   }
   const store = new CostStore()
   ctx.effect(() => () => { store.dispose() }, 'api-cost client store')
+  // The gate's hold lives in the host; this half only observes it and writes the
+  // one flag, so unloading the plugin releases nothing but its own timers.
+  const gateStore = new GateStore()
+  ctx.effect(() => () => { gateStore.dispose() }, 'api-cost gate store')
   const slots = ctx.get('slots')
   if (!slots) {
     console.warn(`[${NAMESPACE}] no slots service; cost pill not mounted`)
@@ -42,6 +47,6 @@ export function apply(ctx: ClientContext): void {
   }
   ctx.effect(() => slots.inject('conversation.composer.dock', () => slots.register(
     { name: 'conversation.composer.dock', id: 'api-cost', order: 20 },
-    createCostPill(store, translate),
+    createCostPill(store, gateStore, translate),
   )), 'api-cost dock entry')
 }

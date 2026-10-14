@@ -7,13 +7,16 @@ import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-experimental-agent-team'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-commands'
+/** Type-only: brings the `llm/stream` waterfall into `Events`, and nothing at runtime. */
+import type {} from '@deepseek-ai/dsh-llm'
 import { z } from 'zod'
-import { createPricingEngine } from '../pricing/index.ts'
+import { createPricingEngine, isPricedModel } from '../pricing/index.ts'
 import { PACKAGE_NAME, PROJECTION_KEY } from '../shared/contracts.ts'
-import type { CostView, PluginConfig } from '../shared/contracts.ts'
+import type { CostView, GateConfig, PluginConfig } from '../shared/contracts.ts'
 import { createCostProjection } from './projection.ts'
 import { CostQueries, QueryError, parseScope } from './query.ts'
 import { registerHttp } from './http.ts'
+import { createOffPeakGate, defaultGateStore } from './gate.ts'
 
 export type * from '../shared/contracts.ts'
 export const name = PACKAGE_NAME
@@ -26,10 +29,15 @@ export const name = PACKAGE_NAME
  */
 export const inject = ['sessionProjections', 'sessionQuery']
 const holidayRange = z.union([z.string(), z.tuple([z.string(), z.string()])])
+const gateSchema: z.ZodType<GateConfig> = z.object({
+  enabled: z.boolean().optional(), persist: z.boolean().optional(),
+  path: z.string().min(1).optional(), models: z.enum(['all', 'priced']).optional(),
+}).strict()
 export const configSchema: z.ZodType<PluginConfig> = z.object({
   holidays: z.record(z.string(), z.object({ holidays: z.array(holidayRange).optional(), makeupWorkdays: z.array(holidayRange).optional() }).strict()).optional(),
   defaultScope: z.enum(['auto', 'self', 'tree', 'team']).optional(),
   tool: z.boolean().optional(), command: z.boolean().optional(),
+  gate: gateSchema.optional(),
 }).strict()
 
 export function describe(view: CostView): string {
@@ -47,6 +55,32 @@ export function apply(ctx: Context, rawConfig: PluginConfig = {}): void {
   }
   const engine = createPricingEngine(config.holidays)
   ctx.effect(() => ctx.sessionProjections.register(createCostProjection(engine)), 'api-cost projection')
+  /**
+   * The off-peak gate. It is created here, before any HTTP or listener wiring,
+   * because its durable flag must be read once for the whole process: every
+   * surface below reads this one value.
+   */
+  const gateConfig = config.gate ?? {}
+  const gate = createOffPeakGate({
+    engine,
+    config: gateConfig,
+    // `config.persist === false` is honoured inside the gate; the store is only
+    // the medium, so the caller always supplies the one true path.
+    store: defaultGateStore(gateConfig.path),
+  })
+  ctx.effect(() => () => gate.dispose(), 'api-cost gate lifetime')
+  /**
+   * `llm/stream` is the one supported seam around every model call in the
+   * process (the agent loop, the title generator, compaction), and the
+   * waterfall resolves synchronously, so this listener must stay synchronous:
+   * a `Promise` return would replace the chunk stream with a promise and break
+   * every model call. `middleware` owns that contract — including returning
+   * `next()` itself, unchanged, whenever the gate does not hold.
+   */
+  const models = gateConfig.models ?? 'all'
+  ctx.on('llm/stream', (options, next) => models === 'priced' && !isPricedModel(options.model)
+    ? next()
+    : gate.middleware(options, next), { prepend: true })
   const queries = new CostQueries({
     async read(id, signal) {
       const observation = await ctx.sessionQuery.observeSession(id as SessionId, { signal, projectionMode: 'all' })
@@ -68,7 +102,7 @@ export function apply(ctx: Context, rawConfig: PluginConfig = {}): void {
   ctx.effect(() => ctx.sessionProjections.onChanged((session, key) => {
     if (key === PROJECTION_KEY || key === 'subagentCatalog' || key === 'agentTeam') queries.invalidate(session.id)
   }), 'api-cost invalidation')
-  ctx.inject(['webServer'], inner => registerHttp(inner, queries, engine, config.defaultScope ?? 'auto'))
+  ctx.inject(['webServer'], inner => registerHttp(inner, queries, engine, config.defaultScope ?? 'auto', gate))
 
   if (config.tool !== false) ctx.inject(['tools'], inner => {
     inner.tools.register({

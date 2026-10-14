@@ -1,6 +1,6 @@
 {
   "name": "dsh-api-cost",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "DeepSeek cost estimates as a session projection: peak/off-peak rates and delegation/team spend attributed to the session that caused it.",
   "type": "module",
   "license": "MIT",

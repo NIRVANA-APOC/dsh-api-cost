@@ -8,6 +8,7 @@ import { countdownString, moneyString } from '../shared/format.ts'
 import { validCoverage, validTotals } from './transport.ts'
 import { cardNotes } from './cardNotes.ts'
 import type { CostStore, ViewState } from './store.ts'
+import type { GateStore, GateStoreState } from './gate.ts'
 import type { CostPillProps } from './types.ts'
 import type { LocaleKey, Translate } from './locale.ts'
 
@@ -40,9 +41,26 @@ const topology = (list: SessionListState): string => JSON.stringify(list.ids.map
 const catalogProjections = (list: SessionListState): string => JSON.stringify(list.ids.map(id => [id, list.byId[id]?.projectionValues?.apiCost?.revision ?? '']))
 const catalogRunning = (list: SessionListState): boolean => list.ids.some(id => list.byId[id]?.running === true)
 const pairedMoney = (money: Money | undefined): string => money ? moneyString(money.cny) + ' · ' + moneyString(money.usd, 'usd') : '—'
+/** A hold can span hours, so the elapsed value is spelled in the reader's units. */
+const holdDuration = (milliseconds: number, t: Translate): string => {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000))
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  if (days > 0) return t('gate.duration.dh', { days, hours })
+  if (hours > 0) return t('gate.duration.hm', { hours, minutes: String(minutes).padStart(2, '0') })
+  return t('gate.duration.ms', { minutes, seconds: String(seconds % 60).padStart(2, '0') })
+}
 
-/** This is the only one-second clock. It mounts only inside the open panel. */
-function Countdown({ at }: { at: number }) {
+/**
+ * This is the only one-second clock. It mounts only inside the open panel.
+ *
+ * `at` counts down to an instant; `since` counts up from one (how long the
+ * current hold has lasted). Both are the same clock, so a hold can never show
+ * two different "now"s in the same panel, and an elapsed value ticks on its own
+ * instead of freezing until the next poll lands.
+ */
+function Countdown({ at, since, format = countdownString }: { at?: number | undefined; since?: number | undefined; format?: ((milliseconds: number) => string) | undefined }) {
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -57,7 +75,7 @@ function Countdown({ at }: { at: number }) {
     tick()
     return () => { stop(); document.removeEventListener('visibilitychange', tick) }
   }, [])
-  return <span>{countdownString(at - now)}</span>
+  return <span>{format(since === undefined ? (at ?? now) - now : now - since)}</span>
 }
 
 /** Open-panel-only positioning, dismissal, observation, and focus restoration. */
@@ -133,8 +151,52 @@ function PricingRows({ pricing, t, models }: { pricing: PricingView | null; t: T
     {notes.length > 0 && <Row label={t('detail.cardNotes')} wrap>{notes.map(issue => t(`issue.${issue}`)).join(' · ')}</Row>}
   </>
 }
+/**
+ * The off-peak gate control, and — while requests are actually parked — the
+ * only place a human can learn why the session looks idle but is still alive.
+ *
+ * Nothing here is inferred: the switch shows the last host-confirmed flag (or
+ * says it is unavailable), `aria-checked` never flips before the host answers,
+ * and a failure keeps the previous value and adds an alert beside it.
+ */
+function GateRows({ gateStore, t, state }: { gateStore: GateStore; t: Translate; state: GateStoreState }) {
+  const view = state.gate
+  const enabled = view?.enabled === true
+  const word = view === null ? (state.error ? t('gate.failed') : t('cost.loading')) : t(enabled ? 'gate.on' : 'gate.off')
+  return <>
+    <Row label={t('gate.title')}>
+      <span className="dac-switchState">
+        {/* The state word is part of the accessible name on purpose: `aria-checked`
+            can only be true/false, so before the first answer it would announce a
+            confident "off" for a state the host has not confirmed yet. */}
+        <button type="button" role="switch" aria-checked={enabled} aria-label={t('gate.title') + ' · ' + word}
+          className={'dac-switch' + (enabled ? ' dac-switch--on' : '')} title={t('gate.hint')}
+          disabled={state.saving || view === null} onClick={() => { void gateStore.setEnabled(!enabled) }}>
+          <span className="dac-switchTrack" aria-hidden="true"><span className="dac-switchKnob" /></span>
+          <span className="dac-switchWord">{word}</span>
+        </button>
+        {state.saving && <span className="dac-actionNote">{t('gate.saving')}</span>}
+        {state.error && <span className="dac-actionNote dac-actionNote--error" role="alert">{state.error}</span>}
+      </span>
+    </Row>
+    {/* releaseAt is null whenever nothing is parked: a countdown against null
+        would render a nonsense duration, so the row only exists while holding. */}
+    {view?.state === 'holding' && <>
+      <Row label={t('gate.holding', { count: view.holding })} wrap>
+        <span className="dac-actionNote">{t('tier.nextOffPeak')} </span>
+        {view.releaseAt === null ? '—' : <Countdown at={view.releaseAt} />}
+      </Row>
+      {view.since !== null && <Row label={t('gate.since')}><Countdown since={view.since} format={milliseconds => holdDuration(milliseconds, t)} /></Row>}
+    </>}
+    {view !== null && view.enabled && view.state !== 'holding' && <Row label={t('gate.passThrough')} wrap>
+      {view.next === null ? '—' : <><span className="dac-actionNote">{t(view.next.peak ? 'tier.nextPeak' : 'tier.nextOffPeak')} </span><Countdown at={view.next.at} /></>}
+    </Row>}
+  </>
+}
 interface PanelProps extends CostPillProps {
   readonly store: CostStore
+  readonly gateStore: GateStore
+  readonly gate: GateStoreState
   readonly sessionId: string
   readonly state: ViewState
   readonly pricing: PricingView | null
@@ -144,7 +206,7 @@ interface PanelProps extends CostPillProps {
   readonly id: string
 }
 function CostPanel(props: PanelProps) {
-  const { store, sessionId, state, pricing, t, anchor, close, id } = props
+  const { store, gateStore, gate, sessionId, state, pricing, t, anchor, close, id } = props
   const useProjection = props.useProjection ?? NO_PROJECTION
   const { panel, position } = usePanel(anchor, close)
   const projectedOwn = useProjection('apiCost', ownTotals)
@@ -170,13 +232,14 @@ function CostPanel(props: PanelProps) {
       <Row label={t('detail.offPeak')}>{pairedMoney(total?.periods.offPeak)}</Row>
       {view?.scope === 'team' && <Row label={t('detail.team')} wrap>{view.members?.length ? <div className="dac-roster">{view.members.map(member => <span key={member.sessionId}>{member.role === 'lead' ? '★ ' : ''}{member.name}: {coverage?.status === 'unavailable' ? '—' : pairedMoney(member.money)}</span>)}</div> : state.loading ? t('cost.loading') : t('cost.unavailable')}</Row>}
       <PricingRows pricing={pricing} t={t} models={view?.byModel?.map(model => model.model)} />
+      <GateRows gateStore={gateStore} t={t} state={gate} />
     </dl>
     <div className="dac-footer"><button type="button" className={'dac-action' + (state.loading ? ' dac-action--busy' : '')} disabled={state.loading} title={t('action.refreshHint')} onClick={() => { void store.refresh(sessionId, true) }}><RefreshMark />{t(state.loading ? 'action.refreshing' : 'action.refresh')}</button>{state.error && <span className="dac-actionNote dac-actionNote--error" role="alert">{state.error}</span>}</div>
   </div>, document.body)
 }
 
 /** Factory captures the single scope-query bridge, not a framework or runtime DSH module. */
-export function createCostPill(store: CostStore, t: Translate) {
+export function createCostPill(store: CostStore, gateStore: GateStore, t: Translate) {
   return function CostPill(props: CostPillProps) {
     const useSession = props.useSession ?? NO_SESSION
     const useSessions = props.useSessions ?? NO_SESSIONS
@@ -193,6 +256,7 @@ export function createCostPill(store: CostStore, t: Translate) {
     const snapshot = useCallback(() => store.snapshot(sessionId), [store, sessionId])
     const state = useSyncExternalStore(subscribe, snapshot, snapshot)
     const price = useSyncExternalStore(store.pricing.subscribe, store.pricing.snapshot, store.pricing.snapshot)
+    const gate = useSyncExternalStore(gateStore.subscribe, gateStore.snapshot, gateStore.snapshot)
     const anchor = useRef<HTMLSpanElement>(null)
     const [openedSession, setOpenedSession] = useState<string | null>(null)
     const close = useCallback(() => setOpenedSession(null), [])
@@ -208,7 +272,11 @@ export function createCostPill(store: CostStore, t: Translate) {
     const costLabel = amount !== undefined ? moneyString(amount) : t(state.loading && !state.view ? 'cost.loading' : 'cost.unavailable')
     const tier = price.pricing ? t(price.pricing.peak ? 'tier.peakShort' : 'tier.offPeakShort') : ''
     const partial = status === 'partial' ? t('cost.partial') : ''
-    const label = [costLabel, tier, partial].filter(Boolean).join(' · ')
-    return <span className="dac-root"><span ref={anchor} className="dac-anchor"><button type="button" className={'dac-pill' + (price.pricing?.peak ? ' dac-pill--peak' : '')} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} aria-label={label} title={state.error ?? price.error ?? undefined} onClick={() => setOpenedSession(open ? null : sessionId)}><CostMark /><span className="dac-label">{[costLabel, tier, partial].filter(Boolean).map((part, index) => <Fragment key={index}>{index > 0 && <span className="dac-sep" aria-hidden="true">·</span>}{part}</Fragment>)}</span></button></span>{open && <CostPanel key={sessionId} {...props} store={store} sessionId={sessionId} state={state} pricing={price.pricing} t={t} anchor={anchor} close={close} id={id} />}</span>
+    // While requests are parked the visible tier alone would read as "idle"; the
+    // hold segment is text, so the reason survives colour-blindness and greyscale.
+    const hold = gate.gate?.state === 'holding' ? t('gate.pillHolding') : ''
+    const parts = [costLabel, tier, hold, partial].filter(Boolean)
+    const label = parts.join(' · ')
+    return <span className="dac-root"><span ref={anchor} className="dac-anchor"><button type="button" className={'dac-pill' + (price.pricing?.peak ? ' dac-pill--peak' : '')} aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined} aria-label={label} title={state.error ?? price.error ?? undefined} onClick={() => setOpenedSession(open ? null : sessionId)}><CostMark /><span className="dac-label">{parts.map((part, index) => <Fragment key={index}>{index > 0 && <span className="dac-sep" aria-hidden="true">·</span>}{part}</Fragment>)}</span></button></span>{open && <CostPanel key={sessionId} {...props} store={store} gateStore={gateStore} gate={gate} sessionId={sessionId} state={state} pricing={price.pricing} t={t} anchor={anchor} close={close} id={id} />}</span>
   }
 }

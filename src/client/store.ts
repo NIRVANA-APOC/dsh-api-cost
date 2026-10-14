@@ -10,11 +10,16 @@ export interface Visibility {
   visible(): boolean
   subscribe(listener: () => void): () => void
 }
-const scheduler: Scheduler = {
+/**
+ * The default clock and page-visibility seams. Exported because a second store
+ * (`GateStore`) must share the very same two, not an equivalent pair: a rollout
+ * of two timers over one document is how a client ends up polling twice.
+ */
+export const scheduler: Scheduler = {
   now: () => Date.now(),
   later(callback, ms) { const timer = globalThis.setTimeout(callback, ms); return () => globalThis.clearTimeout(timer) },
 }
-const visibility: Visibility = {
+export const visibility: Visibility = {
   visible: () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
   subscribe(listener) {
     if (typeof document === 'undefined') return () => {}

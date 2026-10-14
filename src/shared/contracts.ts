@@ -86,5 +86,75 @@ export interface PricingView {
 }
 export type HolidayRange = string | readonly [string, string]
 export type HolidayOverrides = Readonly<Record<string, { readonly holidays?: readonly HolidayRange[] | undefined; readonly makeupWorkdays?: readonly HolidayRange[] | undefined }>>
-export interface PluginConfig { readonly holidays?: HolidayOverrides | undefined; readonly defaultScope?: Scope | undefined; readonly tool?: boolean | undefined; readonly command?: boolean | undefined }
+/**
+ * Off-peak request gate (`src/host/gate.ts`).
+ *
+ * `off`     the user turned it off; every model request dispatches immediately.
+ * `open`    the user turned it on and the tier is off-peak; requests dispatch.
+ * `holding` the user turned it on and the tier is peak; model requests are
+ *           parked until the tier turns off-peak, so the provider call — and
+ *           therefore its settlement — happens entirely inside the cheap window.
+ */
+export type GateState = 'off' | 'open' | 'holding'
+/**
+ * The control surface the capsule panel reads and writes.
+ *
+ * Deliberately shaped so the client can render without a second source of
+ * truth: `peak`/`reason`/`next` come from the pricing engine, `state` and the
+ * counters come from the gate itself. Timestamps are absolute epoch
+ * milliseconds so a client clock skew cannot change what is displayed.
+ */
+export interface GateView {
+  readonly schemaVersion: 2
+  /** The user's choice; the only field the panel writes. */
+  readonly enabled: boolean
+  readonly state: GateState
+  /** The tier in force at `now`, from the same engine that prices settlements. */
+  readonly peak: boolean
+  /** The engine's own reason for that tier (peak-window, weekend, holiday, …). */
+  readonly reason: string
+  /** Instant the current hold releases; null while nothing is held. */
+  readonly releaseAt: number | null
+  /** Model requests currently parked. */
+  readonly holding: number
+  /** Instant the oldest parked request started waiting; null while none is. */
+  readonly since: number | null
+  /** Requests parked since this process started. */
+  readonly heldTotal: number
+  /** Total milliseconds of dispatch delay applied since this process started. */
+  readonly delayedMs: number
+  /** Instant the enabled flag last changed. */
+  readonly changedAt: number
+  /** True when the enabled flag survives a restart of this process. */
+  readonly durable: boolean
+  /** Changes only when this value changes; safe as an ETag component. */
+  readonly revision: string
+  /** The next tier change, so a client re-reads exactly at the boundary. */
+  readonly next: { readonly at: number; readonly peak: boolean } | null
+  /** Instant this view was produced. */
+  readonly now: number
+}
+/** Off-peak gate configuration. Omit `gate` to keep the feature available but off. */
+export interface GateConfig {
+  /** Initial enabled state, used only when nothing durable has been stored. Default false. */
+  readonly enabled?: boolean | undefined
+  /** Persist the enabled state across restarts. Default true. */
+  readonly persist?: boolean | undefined
+  /** Explicit state-file path; defaults to `<dsh home>/state/dsh-api-cost/gate.json`. */
+  readonly path?: string | undefined
+  /**
+   * Which model calls the gate holds. `all` (the default) holds every model
+   * request. `priced` holds only ids the published DeepSeek card prices, so a
+   * subscription-backed or third-party route — where no peak/off-peak rate
+   * exists to save — is never delayed for nothing.
+   */
+  readonly models?: 'all' | 'priced' | undefined
+}
+export interface PluginConfig {
+  readonly holidays?: HolidayOverrides | undefined
+  readonly defaultScope?: Scope | undefined
+  readonly tool?: boolean | undefined
+  readonly command?: boolean | undefined
+  readonly gate?: GateConfig | undefined
+}
 export interface ApiError { readonly ok: false; readonly code: string; readonly message: string }

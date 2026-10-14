@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "API 成本",
-    "description": "DeepSeek 成本估算：峰谷计价、宿主检查点恢复，以及委派与团队花费归集。"
+    "description": "DeepSeek 成本估算：峰谷计价、委派与团队花费归集，以及把模型请求自动推迟到谷时的「避开高峰」开关。"
   }
 }

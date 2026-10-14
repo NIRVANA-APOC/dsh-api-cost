@@ -135,7 +135,10 @@ queries.dispose()
 /* ---- artifact weight --------------------------------------------------- */
 const weight = (path: string): { raw: number; gzip: number } => { const bytes = readFileSync(join(root, path)); return { raw: bytes.length, gzip: gzipSync(bytes, { level: 9 }).length } }
 const client = weight('dist/client.js'), host = weight('dist/index.js')
-check('client-budget', client.gzip <= 10240, `${client.gzip} B gzip (${client.raw} B raw) vs legacy ${baseline.artifacts.client.gzipBytes} B`)
+// 12 KiB, up from 10 KiB: the off-peak gate adds a second client store plus the
+// panel's switch and status rows. The number is duplicated in test/build.test.ts;
+// change both together or the two gates disagree.
+check('client-budget', client.gzip <= 12288, `${client.gzip} B gzip (${client.raw} B raw) vs legacy ${baseline.artifacts.client.gzipBytes} B`)
 check('host-budget', host.gzip <= 20480, `${host.gzip} B gzip (${host.raw} B raw) vs legacy ${baseline.artifacts.host.gzipBytes + baseline.artifacts.pricing.gzipBytes} B`)
 
 console.log('\n' + JSON.stringify({ priceMs100k: Number(priceMs.toFixed(1)), foldMs100k: Number(foldMs.toFixed(0)), stateBytes, coldTreeMs: Number(coldMs.toFixed(1)), warmTreeMs: Number(warmMs.toFixed(2)), clientGzip: client.gzip, hostGzip: host.gzip, failures }, null, 2))

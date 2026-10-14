@@ -69,5 +69,14 @@ export declare const RATE_CARD_AUDIT: {
     };
     holidaySources: string[];
 };
+/**
+ * Whether the published card prices this exact model id.
+ *
+ * Exported for the off-peak gate: holding a call whose route has no peak /
+ * off-peak column buys nothing and only delays the session, so the gate uses
+ * this to decide whether it has anything to save. It answers for the *card*,
+ * not for a settlement — an unpriced model is still recorded the same way.
+ */
+export declare function isPricedModel(model: unknown): boolean;
 export declare const BUNDLED_HOLIDAYS: HolidayOverrides;
 export declare function createPricingEngine(holidays?: HolidayOverrides): PricingEngine;

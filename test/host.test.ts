@@ -38,6 +38,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 
 const VIEW = `${API_PREFIX}/view`
 const PRICING = `${API_PREFIX}/pricing`
+const GATE = `${API_PREFIX}/gate`
 
 /** Explicit Beijing wall-clock time; the tests never read the real clock. */
 const bj = (year: number, month: number, day: number, hour = 0, minute = 0): number =>
@@ -439,7 +440,7 @@ function harness(options: HarnessOptions = {}) {
       for (let index = effectDisposers.length - 1; index >= 0; index -= 1) (effectDisposers[index] as () => void)()
     },
   }
-  apply(ctx, options.config ?? {})
+  apply(ctx, options.config ?? { gate: { persist: false } })
   return h
 }
 
@@ -555,12 +556,14 @@ test('the host half exports the Cordis entry contract and registers one tool and
   assert.equal(name, PACKAGE_NAME)
   assert.equal(typeof apply, 'function')
   const h = harness()
-  assert.deepEqual([...h.routes.keys()].sort(), [VIEW, PRICING].sort(), 'apply must register exactly the view and pricing routes')
+  assert.deepEqual([...h.routes.keys()].sort(), [VIEW, PRICING, GATE].sort(), 'apply must register exactly the view, pricing and gate routes')
   assert.equal(h.tools.length, 1, 'apply must register the session_cost tool through ctx.inject([\'tools\'])')
   assert.equal(h.tools[0].name, 'session_cost')
   assert.equal(h.commands.length, 1, 'apply must register the /cost command through ctx.inject([\'commands\'])')
   assert.equal(h.commands[0].name, 'cost')
-  assert.equal(h.effectDisposers.length, 6, 'apply must register every lifecycle it creates as a ctx.effect disposer')
+  // Six from the fold, the invalidation feed and the three cost routes; two more from
+  // the off-peak gate: its own lifetime plus the gate route it publishes.
+  assert.equal(h.effectDisposers.length, 8, 'apply must register every lifecycle it creates as a ctx.effect disposer')
 })
 
 test('a settled call is priced at the instant its event recorded, peak and off-peak separately', async () => {
@@ -1258,7 +1261,7 @@ test('every effect disposer is usable; disposal removes the routes, aborts in-fl
   h.addSession('life-1', { events: [messageEvent(0, PEAK, 'deepseek-flash', REAL_USAGE)] })
   const healthy = await request(h, VIEW, 'session=life-1')
   assert.equal(healthy.status, 200)
-  assert.equal(h.effectDisposers.length, 6, 'apply must expose a disposer per effect it registered')
+  assert.equal(h.effectDisposers.length, 8, 'apply must expose a disposer per effect it registered')
 
   const viewHandler = h.routes.get(VIEW)
   assert.ok(viewHandler !== undefined, 'the view route must be registered before disposal')

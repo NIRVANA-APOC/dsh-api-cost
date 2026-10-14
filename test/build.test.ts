@@ -17,11 +17,19 @@ const manifest = JSON.parse(read('package.json')) as {
   exports: Record<string, unknown>; dsh: { bundle: { patch: string }; client: { platform: string } }
 }
 const baseline = JSON.parse(read('docs/baseline.json')) as { artifacts: Record<string, { gzipBytes: number }> }
-const CLIENT_BUDGET = 10240
+/**
+ * The 2.0 rewrite shipped at 9.6 KiB gzip under a 10 KiB cap. The off-peak gate
+ * added a whole control surface — a second store, the panel switch and its
+ * status rows, the bilingual copy and the gate's own wire validator — which is
+ * 11.3 KiB, so the cap moved once, deliberately, to 12 KiB. It stays a real
+ * budget: the measured figure is asserted below against a hard number, not
+ * against itself, and the legacy comparison on line 87 still holds.
+ */
+const CLIENT_BUDGET = 12288
 const HOST_BUDGET = 20480
 
 test('the manifest points at files that exist and ships them', () => {
-  assert.equal(manifest.version, '2.0.0')
+  assert.equal(manifest.version, '2.1.0')
   assert.equal(manifest.dsh.client.platform, 'web')
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(manifest.exports['./client'] !== undefined, true)
@@ -105,7 +113,9 @@ test('the host artifact depends on nothing but Node builtins and its declared pe
   for (const name of bare) {
     assert.ok(name.startsWith('node:') || name === 'zod', `unexpected runtime dependency: ${name}`)
   }
-  assert.deepEqual(bare, ['node:crypto', 'zod'])
+  // The gate's durable flag is the only reason the host reads the filesystem at
+  // all, and it stays inside Node's builtins: no storage backend, no new package.
+  assert.deepEqual(bare, ['node:crypto', 'node:fs', 'node:os', 'node:path', 'zod'])
 })
 
 test('the client bundle never inlines a second React or a Harness UI package', () => {

@@ -13,6 +13,13 @@ export const ZH = {
   'issue.missing-usage': '缺少用量报告', 'issue.holiday-data-missing': '节假日数据缺失',
   'issue.before-rate-card': '调用早于当前价目表', 'issue.routing-disputed': 'V4 Pro 路由口径存在冲突（仍按 Pro 价目表计价）',
   'issue.session-unavailable': '会话不可用', 'issue.scope-unavailable': '统计范围不可用', 'issue.scope-truncated': '统计范围已截断',
+  'gate.title': '避开高峰', 'gate.on': '已开启', 'gate.off': '已关闭',
+  'gate.hint': '高峰时段不发送模型请求，等到谷时再发；请求只是暂缓，不会失败',
+  'gate.holding': '等待谷时（{count} 个请求已暂缓）',
+  'gate.passThrough': '当前无请求等待，立即发送',
+  'gate.since': '已等待', 'gate.pillHolding': '等待谷时',
+  'gate.saving': '正在保存…', 'gate.failed': '状态不可用',
+  'gate.duration.dh': '{days} 天 {hours} 小时', 'gate.duration.hm': '{hours} 小时 {minutes} 分', 'gate.duration.ms': '{minutes} 分 {seconds} 秒',
 } as const
 export type LocaleKey = keyof typeof ZH
 export type Translate = (key: LocaleKey, params?: Record<string, unknown>) => string
@@ -31,5 +38,12 @@ export const EN: Record<LocaleKey, string> = {
   'issue.missing-usage': 'Missing usage report', 'issue.holiday-data-missing': 'Holiday data missing',
   'issue.before-rate-card': 'Call predates current rate card', 'issue.routing-disputed': 'V4 Pro routing is disputed (still priced on the Pro card)',
   'issue.session-unavailable': 'Session unavailable', 'issue.scope-unavailable': 'Scope unavailable', 'issue.scope-truncated': 'Scope truncated',
+  'gate.title': 'Avoid peak', 'gate.on': 'On', 'gate.off': 'Off',
+  'gate.hint': 'Hold model requests during peak hours and send them once the off-peak window starts; a request is parked, never failed',
+  'gate.holding': 'Waiting for off-peak ({count} requests parked)',
+  'gate.passThrough': 'Nothing is waiting; requests send immediately',
+  'gate.since': 'Waited', 'gate.pillHolding': 'Holding',
+  'gate.saving': 'Saving…', 'gate.failed': 'State unavailable',
+  'gate.duration.dh': '{days}d {hours}h', 'gate.duration.hm': '{hours}h {minutes}m', 'gate.duration.ms': '{minutes}m {seconds}s',
 }
 export const fallbackTranslate: Translate = (key, params) => ZH[key].replace(/\{(\w+)\}/g, (match: string, name: string) => params && name in params ? String(params[name]) : match)

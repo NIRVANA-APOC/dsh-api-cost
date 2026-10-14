@@ -126,6 +126,17 @@ export const RATE_CARD_AUDIT = freezeTree({
     '国务院办公厅 国办发明电〔2025〕7号 (2026)',
   ],
 })
+/**
+ * Whether the published card prices this exact model id.
+ *
+ * Exported for the off-peak gate: holding a call whose route has no peak /
+ * off-peak column buys nothing and only delays the session, so the gate uses
+ * this to decide whether it has anything to save. It answers for the *card*,
+ * not for a settlement — an unpriced model is still recorded the same way.
+ */
+export function isPricedModel(model: unknown): boolean {
+  return resolve(model).model !== null
+}
 export const BUNDLED_HOLIDAYS: HolidayOverrides = freezeTree({
   '2025': {
     holidays: [

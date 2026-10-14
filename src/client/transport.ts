@@ -1,4 +1,4 @@
-import type { CostView, Coverage, IssueCode, LedgerView, ModelBreakdown, Money, PricingView, RecentCall, Scope, Totals } from '../shared/contracts.ts'
+import type { CostView, Coverage, GateView, IssueCode, LedgerView, ModelBreakdown, Money, PricingView, RecentCall, Scope, Totals } from '../shared/contracts.ts'
 import { isMoneyString, isTokenString } from '../shared/format.ts'
 
 export type Detail = 'summary' | 'full'
@@ -57,12 +57,30 @@ export function validPricingView(v: unknown): v is PricingView {
   })
 }
 
-/** GET-only v2 transport: no billing, replay, reconcile, or legacy DTO adapters. */
+/** The off-peak gate control surface: exact enums, non-negative counters, nullable instants. */
+export function validGateView(v: unknown): v is GateView {
+  if (!record(v) || v.schemaVersion !== 2) return false
+  if (typeof v.enabled !== 'boolean' || typeof v.peak !== 'boolean' || typeof v.durable !== 'boolean') return false
+  if (v.state !== 'off' && v.state !== 'open' && v.state !== 'holding') return false
+  if (!text(v.reason) || !text(v.revision)) return false
+  if (!time(v.now) || !time(v.changedAt) || !time(v.delayedMs)) return false
+  if (!count(v.holding) || !count(v.heldTotal)) return false
+  if (v.releaseAt !== null && !time(v.releaseAt)) return false
+  if (v.since !== null && !time(v.since)) return false
+  return v.next === null || (record(v.next) && time(v.next.at) && typeof v.next.peak === 'boolean')
+}
+
+/** v2 transport: cost, pricing and gate reads, plus the single gate mutation. */
 export class CostTransport {
   private readonly fetcher: Fetcher
   constructor(fetcher: Fetcher = globalThis.fetch.bind(globalThis)) { this.fetcher = fetcher }
   private async get(url: string, signal: AbortSignal): Promise<unknown> {
     const response = await this.fetcher(url, { method: 'GET', headers: { accept: 'application/json' }, signal })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    return response.json()
+  }
+  private async post(url: string, payload: unknown, signal: AbortSignal): Promise<unknown> {
+    const response = await this.fetcher(url, { method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/json' }, body: JSON.stringify(payload), signal })
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     return response.json()
   }
@@ -77,6 +95,17 @@ export class CostTransport {
   async pricing(signal: AbortSignal): Promise<PricingView> {
     const body = await this.get('/dsh-api-cost/v2/pricing', signal)
     if (!validPricingView(body)) throw new Error('Malformed pricing view')
+    return body
+  }
+  async gate(signal: AbortSignal): Promise<GateView> {
+    const body = await this.get('/dsh-api-cost/v2/gate', signal)
+    if (!validGateView(body)) throw new Error('Malformed gate view')
+    return body
+  }
+  /** The one mutation: the published value is the host's answer, never the request's. */
+  async setGate(enabled: boolean, signal: AbortSignal): Promise<GateView> {
+    const body = await this.post('/dsh-api-cost/v2/gate', { enabled }, signal)
+    if (!validGateView(body)) throw new Error('Malformed gate view')
     return body
   }
 }

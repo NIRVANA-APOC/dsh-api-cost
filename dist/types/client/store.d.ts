@@ -8,6 +8,13 @@ export interface Visibility {
     visible(): boolean;
     subscribe(listener: () => void): () => void;
 }
+/**
+ * The default clock and page-visibility seams. Exported because a second store
+ * (`GateStore`) must share the very same two, not an equivalent pair: a rollout
+ * of two timers over one document is how a client ends up polling twice.
+ */
+export declare const scheduler: Scheduler;
+export declare const visibility: Visibility;
 export interface ViewState {
     readonly view: CostView | null;
     readonly loading: boolean;

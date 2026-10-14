@@ -30,5 +30,18 @@ export const CSS = `
 .dac-action--busy svg { animation: dac-spin 900ms linear infinite; }
 .dac-actionNote { color: var(--dsw-alias-label-tertiary); font-size: 11px; }
 .dac-actionNote--error { color: var(--dsw-alias-state-error-primary); }
+/* Off-peak gate switch. The knob's position and the visible state word carry
+   on/off; colour only reinforces them, so the control survives greyscale. */
+.dac-switchState { align-items: center; gap: 6px; min-width: 0; display: inline-flex; }
+.dac-switch { appearance: none; font: inherit; font-size: 12px; color: var(--dsw-alias-label-secondary); cursor: pointer; background: none; border: 0; border-radius: var(--dsw-radius-sm, 6px); align-items: center; gap: 6px; padding: 2px 6px 2px 3px; display: inline-flex; }
+.dac-switch:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.dac-switch:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.dac-switch:disabled { cursor: default; opacity: 0.65; }
+.dac-switchTrack { box-sizing: border-box; position: relative; flex: none; width: 26px; height: 14px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px; background: var(--dsw-alias-separator-primary); transition: background-color 120ms linear, border-color 120ms linear; }
+.dac-switchKnob { position: absolute; top: 1px; left: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--dsw-alias-label-secondary); transition: transform 120ms ease, background-color 120ms linear; }
+.dac-switch--on .dac-switchTrack { background: var(--dsw-alias-brand-primary); border-color: var(--dsw-alias-brand-primary); }
+.dac-switch--on .dac-switchKnob { background: var(--dsw-specific-menu); transform: translateX(12px); }
+.dac-switchWord { white-space: nowrap; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .dac-switchTrack, .dac-switchKnob { transition: none; } }
 @keyframes dac-spin { to { transform: rotate(360deg); } }
 `
