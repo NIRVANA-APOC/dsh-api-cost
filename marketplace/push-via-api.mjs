@@ -26,11 +26,15 @@ const gh = (args, payload) => {
     args = [...args, '--input', input]
   }
   // Capture gh's stdout through a file: the sandbox forbids stdio pipes to a child.
+  // gh may also print a relocation warning, so keep only the last non-empty line.
   const outFile = join(dir, 'out.txt')
   execFileSync('pwsh', ['-NoProfile', '-Command',
     `& gh ${args.map((a) => `'${String(a).replace(/'/g, "''")}'`).join(' ')} *> '${outFile}'`,
   ], { stdio: 'inherit' })
-  return readFileSync(outFile, 'utf8')
+  const lines = readFileSync(outFile, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  const last = lines.at(-1) ?? ''
+  if (last.startsWith('{') || /^gh: /.test(last)) throw new Error(last)
+  return last
 }
 
 let ok = 0

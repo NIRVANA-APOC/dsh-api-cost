@@ -7,9 +7,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const REPO = 'NIRVANA-APOC/dsh-api-cost'
-const [targetSha, message, ...oldSubjects] = process.argv.slice(2)
-if (!targetSha || !message || oldSubjects.length === 0) {
-  console.error('usage: node flip-commit.mjs <sha> <message> "<old subject>" ...')
+const [targetSha, message] = process.argv.slice(2)
+const oldSubjects = []
+if (!targetSha || !message) {
+  console.error('usage: node flip-commit.mjs <target-commit-sha> <new-message>')
+  console.error('(folds every consecutive ancestor that shares <new-message> as its subject)')
   process.exit(2)
 }
 
@@ -51,16 +53,17 @@ while (parent) {
   // the commits list endpoint returns parents as bare {sha} refs, so resolve each
   const p = await api(`/repos/${REPO}/commits/${parent.sha}`)
   const subject = p.commit.message.split('\n')[0]
-  if (!oldSubjects.includes(subject)) break
+  if (subject !== message) break
   console.log(`  folding     : ${p.sha.slice(0, 8)}  ${subject}`)
-  removed.push(subject)
+  removed.push(p.sha)
   parent = p.parents[0]
 }
 
-if (removed.length !== oldSubjects.length || !oldSubjects.every((s) => removed.includes(s))) {
-  console.error(`refusing to rewrite: expected ${oldSubjects.length} commits (${oldSubjects.join(' | ')}), walked ${removed.length} (${removed.join(' | ')})`)
+if (removed.length === 0) {
+  console.error(`refusing to rewrite: no consecutive ancestor carries the subject "${message}"`)
   process.exit(1)
 }
+console.log(`  folded ${removed.length} commit(s) into one`)
 
 const baseSha = parent ? parent.sha : null
 const baseTree = baseSha ? (await api(`/repos/${REPO}/git/commits/${baseSha}`)).tree.sha : null
