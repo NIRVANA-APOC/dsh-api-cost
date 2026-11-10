@@ -1,0 +1,171 @@
+name: npm-publish
+
+# Publish `dsh-api-cost` to npm.
+#
+# Triggered by a published GitHub Release (the canonical release path) and by a
+# manual workflow_dispatch that defaults to a dry run, so the whole pipeline can be
+# rehearsed without touching the registry.
+#
+# Authentication order:
+#   1. The NPM_TOKEN repository secret — for packages that do not exist on the
+#      registry yet, and as a fallback. It must be a granular token with
+#      "Bypass two-factor authentication" checked: npm now requires 2FA (or a bypass
+#      token) for every create/publish, and a token without that flag fails with EOTP.
+#   2. No NPM_TOKEN — publish over npm OIDC trusted publishing (id-token: write).
+#      Preferred for dsh-api-cost now that the package exists; see docs/releasing.md.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Run the full pipeline and `npm publish --dry-run` without publishing'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write
+
+# One release at a time, and never cancel an in-flight publish: a run that was
+# cancelled between the registry upload and its bookkeeping leaves the maintainer
+# guessing. A second release queues behind the first instead.
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # `secrets` is not available in a step-level `if:`, so the boolean is
+      # materialised once in the job-level env (the `env` context IS readable from
+      # `if:`). Empty secret -> 'false'.
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          # No `cache:` key on purpose: a release build stays cache-free. v4 has no
+          # automatic package-manager caching, so nothing can silently restore one.
+
+      - name: Show tool versions
+        run: |
+          node --version
+          npm --version
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Benchmarks
+        run: pnpm bench
+
+      - name: Assert the committed dist is current
+        run: git diff --exit-code -- dist
+
+      - name: Check the release tag matches package.json
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="$(node --print 'require("./package.json").version')"
+          tag="${RELEASE_TAG#v}"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::release tag '$RELEASE_TAG' does not match package.json version '$version'"
+            exit 1
+          fi
+          echo "release tag '$RELEASE_TAG' matches package.json version '$version'"
+
+      - name: Pack the tarball
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/npm-pack"
+          pnpm pack --pack-destination "$RUNNER_TEMP/npm-pack"
+
+      - name: Upload the packed tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-pack
+          path: ${{ runner.temp }}/npm-pack/*.tgz
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish with NPM_TOKEN
+        if: env.HAS_NPM_TOKEN == 'true' && (github.event_name != 'workflow_dispatch' || inputs['dry-run'] == false)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
+
+      - name: Publish with OIDC trusted publishing
+        if: env.HAS_NPM_TOKEN != 'true' && (github.event_name != 'workflow_dispatch' || inputs['dry-run'] == false)
+        env:
+          # Present but empty: keeps setup-node's `${NODE_AUTH_TOKEN}` interpolation
+          # happy while leaving the token unset, so the CLI falls through to OIDC.
+          NODE_AUTH_TOKEN: ''
+        run: |
+          set -euo pipefail
+          # setup-node writes `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`
+          # into the runner .npmrc. Drop it so nothing is mistaken for a token:
+          # trusted publishing only activates when no token is configured and
+          # generates provenance automatically.
+          npm config delete '//registry.npmjs.org/:_authToken' || true
+          npm publish --access public
+
+      - name: Verify the version is live on npm
+        if: github.event_name != 'workflow_dispatch' || inputs['dry-run'] == false
+        env:
+          # Empty rather than unset: setup-node's registry-url writes an .npmrc
+          # reference to NODE_AUTH_TOKEN, and npm fails to load config that
+          # interpolates an undefined variable. `npm view` reads a public package.
+          NODE_AUTH_TOKEN: ''
+        run: |
+          set -euo pipefail
+          version="$(node --print 'require("./package.json").version')"
+          for attempt in $(seq 1 12); do
+            live="$(npm view "dsh-api-cost@$version" version 2>/dev/null || true)"
+            if [ "$live" = "$version" ]; then
+              echo "dsh-api-cost@$version is live on the registry"
+              exit 0
+            fi
+            echo "attempt $attempt/12: dsh-api-cost@$version not live yet; retrying in 5s"
+            sleep 5
+          done
+          echo "::error::npm publish reported success but dsh-api-cost@$version is not live after 60s."
+          echo "A brand-new package's first publish can be staged by the registry."
+          echo "Approve it on npmjs.com -> Staged Packages (2FA) or run 'npm stage approve <stage-id>' (npm >= 11.15), then re-run this job."
+          exit 1
+
+      - name: Dry run (rehearsal)
+        if: github.event_name == 'workflow_dispatch' && inputs['dry-run'] == true
+        env:
+          # Empty, not unset: setup-node's `registry-url` writes
+          # `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into the runner
+          # .npmrc, and npm fails to load a config referencing an undefined
+          # variable. Nothing authenticates in a dry run either way.
+          NODE_AUTH_TOKEN: ''
+        run: |
+          set -euo pipefail
+          npm config delete '//registry.npmjs.org/:_authToken' || true
+          npm publish --dry-run --access public
