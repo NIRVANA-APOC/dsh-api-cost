@@ -57,14 +57,31 @@ export function validPricingView(v: unknown): v is PricingView {
   })
 }
 
-/** The off-peak gate control surface: exact enums, non-negative counters, nullable instants. */
+/**
+ * The per-session off-peak gate control surface (schema version 4): exact enums,
+ * a source consistent with `inheritedFrom`, subtree counters that cannot invert,
+ * non-negative counters and nullable instants.
+ */
 export function validGateView(v: unknown): v is GateView {
-  if (!record(v) || v.schemaVersion !== 2) return false
+  if (!record(v) || v.schemaVersion !== 4) return false
+  if (!text(v.sessionId) || v.sessionId === '') return false
   if (typeof v.enabled !== 'boolean' || typeof v.peak !== 'boolean' || typeof v.durable !== 'boolean') return false
   if (v.state !== 'off' && v.state !== 'open' && v.state !== 'holding') return false
+  if (v.source !== 'self' && v.source !== 'inherited' && v.source !== 'default') return false
+  // `inheritedFrom` names the ancestor being followed: required for `inherited`,
+  // forbidden for the two sources that are not inherited. An inconsistent pair
+  // means the host and the panel disagree about who owns the switch.
+  if (v.source === 'inherited') {
+    if (!text(v.inheritedFrom) || v.inheritedFrom === '') return false
+  } else if (v.inheritedFrom !== null) return false
   if (!text(v.reason) || !text(v.revision)) return false
-  if (!time(v.now) || !time(v.changedAt) || !time(v.delayedMs)) return false
-  if (!count(v.holding) || !count(v.heldTotal)) return false
+  if (!time(v.now) || !time(v.delayedMs)) return false
+  // `null` means "this session still inherits the configured default"; a real
+  // change instant is a finite epoch millisecond (0 is legal, if never emitted).
+  if (v.changedAt !== null && !time(v.changedAt)) return false
+  if (!count(v.holding) || !count(v.ownHolding) || !count(v.heldTotal) || !count(v.otherHolding)) return false
+  // The subtree total bounds this session's own share; an inverted payload is a bug.
+  if (v.ownHolding > v.holding) return false
   if (v.releaseAt !== null && !time(v.releaseAt)) return false
   if (v.since !== null && !time(v.since)) return false
   return v.next === null || (record(v.next) && time(v.next.at) && typeof v.next.peak === 'boolean')
@@ -97,15 +114,15 @@ export class CostTransport {
     if (!validPricingView(body)) throw new Error('Malformed pricing view')
     return body
   }
-  async gate(signal: AbortSignal): Promise<GateView> {
-    const body = await this.get('/dsh-api-cost/v2/gate', signal)
-    if (!validGateView(body)) throw new Error('Malformed gate view')
+  async gate(sessionId: string, signal: AbortSignal): Promise<GateView> {
+    const body = await this.get('/dsh-api-cost/v2/gate?session=' + encodeURIComponent(sessionId), signal)
+    if (!validGateView(body) || body.sessionId !== sessionId) throw new Error('Malformed gate view')
     return body
   }
   /** The one mutation: the published value is the host's answer, never the request's. */
-  async setGate(enabled: boolean, signal: AbortSignal): Promise<GateView> {
-    const body = await this.post('/dsh-api-cost/v2/gate', { enabled }, signal)
-    if (!validGateView(body)) throw new Error('Malformed gate view')
+  async setGate(sessionId: string, enabled: boolean, signal: AbortSignal): Promise<GateView> {
+    const body = await this.post('/dsh-api-cost/v2/gate', { session: sessionId, enabled }, signal)
+    if (!validGateView(body) || body.sessionId !== sessionId) throw new Error('Malformed gate view')
     return body
   }
 }

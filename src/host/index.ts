@@ -21,6 +21,18 @@ import { createOffPeakGate, defaultGateStore } from './gate.ts'
 export type * from '../shared/contracts.ts'
 export const name = PACKAGE_NAME
 /**
+ * The two host lookups the gate's parent resolver needs, stated structurally.
+ * `Context.sessions` is augmented both by the host `SessionStore` and by the
+ * client session-controller registry (`ISessions`), and this package compiles
+ * both halves in one program, so the merged property type is the client face.
+ * The host entry points below are the documented ones; the cast is confined to
+ * this resolver and the shapes are read-only.
+ */
+interface SessionLineage { readonly header: { readonly parentSession?: SessionId | undefined } }
+interface SessionLookup { get(id: SessionId): SessionLineage | undefined }
+interface AgentLineage { readonly session: SessionLineage }
+interface AgentLookup { get(id: SessionId): AgentLineage | undefined }
+/**
  * The projection registry and the observation reader are the whole purpose of
  * this plugin. `webServer`, `tools` and `commands` are used when the composition
  * has them, so a read-only or tool-less composition still meters correctly.
@@ -56,26 +68,62 @@ export function apply(ctx: Context, rawConfig: PluginConfig = {}): void {
   const engine = createPricingEngine(config.holidays)
   ctx.effect(() => ctx.sessionProjections.register(createCostProjection(engine)), 'api-cost projection')
   /**
-   * The off-peak gate. It is created here, before any HTTP or listener wiring,
-   * because its durable flag must be read once for the whole process: every
-   * surface below reads this one value.
+   * The off-peak gate. One instance is shared by the middleware and the HTTP
+   * surface. A switch is stored for exactly one session, but its scope is that
+   * session and the sessions it delegates to: `options.sessionId` selects the
+   * conversation a model call belongs to, and the live parent links decide which
+   * explicit ancestor's switch governs it.
    */
   const gateConfig = config.gate ?? {}
+  /**
+   * The live delegation link of one session. `sessions` is authoritative; the
+   * agent registry is the fallback for a session whose store entry is not visible
+   * from this context. Both are read through `ctx.get`, so a composition without
+   * them has no links (every session is a root) rather than failing to load, and
+   * this resolver must stay synchronous and never throw: the gate calls it from
+   * inside a model-call decision.
+   */
+  const parentOf = (sessionId: string): string | undefined => {
+    try {
+      const id = sessionId as SessionId
+      const fromSession = (ctx.get('sessions') as unknown as SessionLookup | undefined)?.get(id)?.header.parentSession
+      if (fromSession !== undefined) return String(fromSession)
+      const fromAgent = (ctx.get('agents') as unknown as AgentLookup | undefined)?.get(id)?.session.header.parentSession
+      return fromAgent === undefined ? undefined : String(fromAgent)
+    } catch { return undefined }
+  }
   const gate = createOffPeakGate({
     engine,
     config: gateConfig,
     // `config.persist === false` is honoured inside the gate; the store is only
     // the medium, so the caller always supplies the one true path.
     store: defaultGateStore(gateConfig.path),
+    parentOf,
   })
   ctx.effect(() => () => gate.dispose(), 'api-cost gate lifetime')
+  /**
+   * `session/created` is the one announcement of a delegation link: its
+   * `header.parentSession` is the durable parent lineage. The gate keeps these
+   * links in memory only (the durable file stores explicit choices, never the
+   * tree), so this listener is how the tree is rebuilt in a fresh process. It
+   * must never throw: a synchronous `session/created` listener failure vetoes and
+   * rolls back the session creation.
+   */
+  ctx.effect(() => ctx.on('session/created', (session) => {
+    try {
+      const parentSession = session.header.parentSession
+      gate.observeSession(String(session.id), parentSession === undefined ? undefined : String(parentSession))
+    } catch { /* a link we could not record is one the live resolver may still supply */ }
+  }), 'api-cost gate parent links')
   /**
    * `llm/stream` is the one supported seam around every model call in the
    * process (the agent loop, the title generator, compaction), and the
    * waterfall resolves synchronously, so this listener must stay synchronous:
    * a `Promise` return would replace the chunk stream with a promise and break
    * every model call. `middleware` owns that contract — including returning
-   * `next()` itself, unchanged, whenever the gate does not hold.
+   * `next()` itself, unchanged, whenever this call's session is not gated.
+   * `options.sessionId` is the loop-stamped session identity; a call without one
+   * is never gated, and the gate never looks a session up any other way.
    */
   const models = gateConfig.models ?? 'all'
   ctx.on('llm/stream', (options, next) => models === 'priced' && !isPricedModel(options.model)

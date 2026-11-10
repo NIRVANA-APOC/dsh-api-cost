@@ -1,6 +1,6 @@
 <h1 align="center">dsh-api-cost</h1>
 
-<p align="center">DeepSeek cost estimation for DeepSeek Harness: peak / off-peak rates, delegation or team spend attributed to the session that caused it, folded by the host's session projections.</p>
+<p align="center">DeepSeek Harness 的 DeepSeek 成本估算：峰谷计价、归集到发起会话的委派与团队花费，由宿主会话投影折叠得出。</p>
 
 <p align="center">
   <a href="https://github.com/NIRVANA-APOC/dsh-api-cost/actions/workflows/test.yml"><img src="https://github.com/NIRVANA-APOC/dsh-api-cost/actions/workflows/test.yml/badge.svg" alt="tests"></a>
@@ -8,199 +8,216 @@
   <img src="https://img.shields.io/badge/DSH-plugin-4c8bf5" alt="DSH plugin">
 </p>
 
-<p align="center"><b>English</b> · <a href="README.zh.md">中文</a></p>
+<p align="center"><a href="README.en.md">English</a> · <b>中文</b></p>
 
 ---
 
-`dsh-api-cost` 2.0 is a **TypeScript, projection-first** rewrite. Instead of metering streams, replaying logs and polling on a timer, the plugin registers one pure session projection; the Harness owns the event drive, the per-session watermark, the durable checkpoint and the delivery to the browser. The client half reads the host's own projection through the framework `useProjection` seat.
+`dsh-api-cost` 2.x 采用**以投影为核心的 TypeScript 设计**。它不再自己监听流、重放日志、按时轮询，而是注册一个纯会话投影；事件驱动、每会话水位、持久化检查点与浏览器投递都由 Harness 负责。客户端半边通过框架自带的 `useProjection` 座位直接读取宿主投影。
 
-What that buys you:
+这样得到的好处：
 
-- **Correct history without a recount button** — the first read of a session, a resumed conversation, or a restart all fold from the durable log through the host's checkpoint cache, so a figure never starts at ¥0 and never double counts.
-- **Real settlement semantics** — one billed event per `assistant/message` (or `assistant/attempt` fallback), priced at the *event's* own settlement time, with fork-inherited prefixes excluded from a child's own spend.
-- **Honest delegation and team totals** — `self`, `tree` and `team` scopes resolved from durable subagent catalogs and the team roster, with `own` always meaning *this session* and `others = total − own`.
-- **An optional Avoid-peak switch** — one toggle in the pill's panel parks model requests until the cheap window opens, so the call is billed off-peak and the model never sees a failure.
-- **Lightweight by construction** — no replay framework, no database, no own polling loop. Built artifacts: client ≈ **11.3 KiB gzip**, host ≈ **13.1 KiB gzip**.
+- **历史不用手动补，也不会重复计** —— 第一次读取某个会话、恢复旧会话或重启之后再进来，都是从持久日志经宿主检查点缓存折叠得出，不会从 ¥0 起算，也不会翻倍。
+- **真实的结算语义** —— 每个 `assistant/message`（缺失时回退到 `assistant/attempt`）计一次，按事件**自身结算时刻**定价，fork 继承的前缀不计入子会话自身花费。
+- **如实的委派与团队** —— `self`、`tree`、`team` 三个范围分别由持久子智能体目录与团队名单解析；`own` 永远指**本会话**，`others = total − own`。
+- **按会话树生效的「避开高峰」开关** —— 每个会话的面板都有一个开关；开启且当前处于高峰时，暂缓**本会话及其委派的子会话**发出的模型请求，等到谷时再发，于是按谷时计价，而模型全程无感。它只作用于这一棵会话树：另一个对话不会因为你在这里等谷时被一起停住。
+- **结构上就轻** —— 没有重放框架、没有数据库、没有自有轮询循环。产物体积：客户端约 **13.7 KiB gzip**，宿主约 **15.0 KiB gzip**。
 
-**Contents:** [Requirements](#requirements) · [Install](#install) · [Usage](#usage) · [Avoiding peak hours](#avoiding-peak-hours) · [HTTP](#http) · [Rates](#rates) · [Configuration](#configuration) · [What it does not promise](#what-it-does-not-promise) · [Development](#development) · [Migrating from 1.x](#migrating-from-1x) · [License](#license)
+**目录：** [运行要求](#运行要求) · [安装](#安装) · [用法](#用法) · [避开高峰](#避开高峰) · [HTTP](#http) · [费率](#费率) · [配置](#配置) · [它不承诺什么](#它不承诺什么) · [开发](#开发) · [从 1.x 迁移](#从-1x-迁移) · [许可](#许可)
 
-## Requirements
+## 运行要求
 
-- DeepSeek Harness **0.2.0-rc.2** with the `sessionProjections`, `sessionProjectionCache` and `sessionQuery` capabilities mounted (the shipped `web` and `desktop` profiles have them).
-- Node.js **24** or newer for development only; the published package ships prebuilt JavaScript.
+- DeepSeek Harness **0.2.0-rc.2**，且已装配 `sessionProjections`、`sessionProjectionCache`、`sessionQuery` 三项能力（自带的 `web` 与 `desktop` profile 都有）。
+- 仅开发时需要 Node.js **24** 或更高；发布的包里已是预编译 JavaScript。
 
-The plugin declares those services in `inject`, so in a composition without them it stays inactive rather than half-working. The Avoid-peak switch additionally uses the `llm` service's `llm/stream` waterfall; a composition without `llm` simply has nothing to hold, and every other surface keeps working.
+插件在 `inject` 里声明这些服务，缺少它们的组合里它会保持未激活，而不是半途失效。按会话树生效的「避开高峰」另外用到 `llm` 服务的 `llm/stream` 瀑布；没有 `llm` 的组合只是无处可缓，其余功能照常。
 
-## Install
+## 安装
 
 ```sh
-dsh plugin --profile web add dsh-api-cost                # from npm
-dsh plugin --profile web add /absolute/path/to/checkout  # from a checkout or a git URL
+dsh plugin --profile web add dsh-api-cost                # 从 npm
+dsh plugin --profile web add /absolute/path/to/checkout  # 从仓库或 git 地址
 ```
 
-The package ships `dist/index.js` (ESM host) and `dist/client.js` (the lazy browser factory), so **installation never runs a compiler**. A local source checkout must be built once with `pnpm build` before it is installed that way.
+包内已带 `dist/index.js`（ESM 宿主）与 `dist/client.js`（懒加载浏览器工厂），所以**安装过程不需要编译器**。从本地源码目录安装时，需要作者先执行一次 `pnpm build`。
 
-Host-side features (the projection, `/cost`, `session_cost`, the HTTP reads) take effect immediately. The composer pill appears once the client bundle is composed at startup, so restart DSH once.
+宿主侧能力（投影、`/cost`、`session_cost`、HTTP 读取）立即生效；输入框那枚胶囊要等启动时合成客户端包，所以**需要重启 DSH 一次**。
 
-## Usage
+## 用法
 
-### The pill
+### 胶囊
 
-Beside the shipped session-stats pills, the cost pill shows this session's estimated spend and the period in force (**peak** / **off-peak** spelled out in words, never colour alone). It reads the host projection directly, so it repaints when a settlement lands — not on a timer. A `Partial` marker appears whenever any contributing session is unpriced, truncated or unreadable.
+和官方的会话统计胶囊并排，它安静地待在原地：本会话估算花费、一条细分隔线，以及写成文字的时段**峰** / **谷**（用该时段的计价色，但从不只靠颜色区分）。本会话金额直接读取宿主投影，因此在结算发生时重绘，而不是靠定时器。只要范围内有未定价、被截断或读不到的会话，就会出现「部分统计」标记；有请求在等待时，胶囊再加上「等待谷时」几个字，并在放得下时带上正在等待的数量（`×2`）。
 
-| Off-peak | Peak |
+| 空闲 | 高峰 |
 | --- | --- |
-| ![The pill in the off-peak tier: this session's cost in CNY with the tier written as the word 谷, in the neutral colour](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/pill-off-peak.png) | ![The same figure during peak hours: the tier reads 峰 and the capsule switches to the warning colour](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/pill-peak.png) |
+| ![空闲时段的胶囊：本会话花费、一条细分隔线，时段用文字写成「谷」并采用谷时的蓝色](assets/pill-off-peak.png) | ![高峰时段的同一枚安静胶囊：时段用文字写成「峰」并采用高峰的琥珀色](assets/pill-peak.png) |
 
-### The panel
+### 明细面板
 
-Clicking the pill (or pressing Enter on it) opens a trigger-anchored dialog: totals, the this-session / other-session split, the peak / off-peak split, the priced-call count, coverage, the team roster when the scope is a team, current rates, a rate-card notes row when the published card carries a caveat that affects this scope, the countdown to the next period change, an **Avoid-peak switch** (see below), and a **Refresh** button that re-reads the scope instead of replaying logs. Token buckets and the per-model breakdown are deliberately not on the panel; they stay available through `/cost`, `session_cost` and `detail=full`.
+点击胶囊（或对它按回车）弹出锚定在触发器上方的对话框；2.2 起它围绕两种计价方式组织，而不是一张行列表：
 
-![The detail panel for one session: total in CNY and USD, this-session and other-session split, partial coverage naming the unknown-model reason, session and priced-call counts, the peak and off-peak split, the period with a countdown, the rates in force, and the Refresh button](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/panel-session.png)
+- 顶栏写当前时段，以及距下次切换的倒计时——什么时候便宜，和花了多少同样重要；
+- 本会话的估算花费是视觉重心，用应用的品牌字体书写，旁边是美元列，下面是该范围的统计数字；
+- 一条**峰谷条**把这笔钱按高峰与空闲切开——琥珀对蓝，两端各写自己的金额与「峰 / 谷」二字——不看数字也能先读出这笔花费的时段构成；
+- 接着是本会话 / 其他会话的拆分、覆盖状态（每条口径提示都用文字写出）、当前生效的费率与单位行；
+- 一个**对本会话及其子会话生效的避开高峰区块**：开关、一行写明范围的说明，以及等待中的状态——这棵会话树共几个请求已暂缓（含子会话的那部分）、何时放行、已经等了多久，以及**其他会话**（无关对话）里有几个请求在等；
+- 一个**刷新**按钮——它重新读取该范围，而不是重放日志。
 
-### Scopes
+token 明细与按模型拆分刻意不放进面板，它们仍可通过 `/cost`、`session_cost` 与 `detail=full` 获取。
 
-| Scope | Meaning |
+![重设计后的单个会话明细面板（高峰时段）：本会话花费、时段与倒计时、把高峰与空闲花费切开的琥珀 / 蓝色峰谷条、本会话与其他会话拆分、写明未知模型原因的部分统计、当前费率，以及按会话树生效的避开高峰区块：共 2 个请求已暂缓（其中 1 个来自子会话）、放行倒计时，并说明其他会话还有 1 个请求在等](assets/panel-session.png)
+
+### 范围
+
+| 范围 | 含义 |
 | --- | --- |
-| `auto` (default) | The verified team when the session is a team member, otherwise its delegation tree. |
-| `self` | This session only. |
-| `tree` | This session plus every durable subagent descendant. |
-| `team` | The whole team: lead, members and their descendants. Refused when membership cannot be verified. |
+| `auto`（默认） | 能验证到团队时用整个团队，否则用自己的委派树。 |
+| `self` | 只看本会话。 |
+| `tree` | 本会话加全部持久化的子智能体后代。 |
+| `team` | 整个团队：Lead、成员及其后代；成员身份无法验证时报错而不是假装成功。 |
 
-A `team` scope names every member's own money under **Team roster**, with the Lead marked ★:
+`team` 范围会在「团队成员」下列出每个成员自己的金额，Lead 前置 ★：
 
-![The detail panel for a Team scope: the total with the requesting seat's own share, complete coverage across seven sessions, and the roster with the Lead marked ★ and one money figure per member](https://raw.githubusercontent.com/NIRVANA-APOC/dsh-api-cost/main/assets/panel-team.png)
+![重设计后的团队范围明细面板：团队合计用品牌字体书写、整条为蓝色的谷时峰谷条、七个会话的完整覆盖，以及 Lead 前置 ★ 且每名成员各一行金额的名单](assets/panel-team.png)
 
-### Command and tool
+### 命令与工具
 
-| Surface | Behaviour |
+| 出口 | 行为 |
 | --- | --- |
-| `/cost [sessionId] [auto\|self\|tree\|team]` | Prints the same summary the pill shows, including coverage warnings. |
-| `session_cost` | Lets the assistant read a session's estimate; defaults to the calling session. |
+| `/cost [sessionId] [auto\|self\|tree\|team]` | 打印与胶囊一致的摘要，包含覆盖告警。 |
+| `session_cost` | 让助手自己查询某个会话的估算；不传即当前会话。 |
 
-## Avoiding peak hours
+## 避开高峰
 
-Peak windows cost twice the off-peak rate: DeepSeek Flash is ¥2 / ¥8 per million cache-miss / output tokens during peak against ¥1 / ¥4 off-peak, and V4 Pro is ¥9 / ¥27 against ¥4.5 / ¥13.5. If a request does not have to be answered *now*, it does not have to be billed at the expensive rate.
+高峰时段的价格是谷时的两倍：DeepSeek Flash 高峰每百万 tokens 缓存未命中 ¥2、输出 ¥8，谷时是 ¥1 / ¥4；V4 Pro 高峰 ¥9 / ¥27，谷时 ¥4.5 / ¥13.5。如果一个请求不是**此刻**必须得到回答，它就不必按贵的那一档计费。
 
-The panel has one switch for that. **Avoid peak** (`避开高峰`) is off until you turn it on; while it is on and the current tier is peak, every model request in the process is *parked* rather than sent, and released the moment the tier turns off-peak. The request itself is unchanged — same messages, same tools, same bytes — so the answer is the same one you would have got, at half the price.
+每个会话面板里的**避开高峰**默认关闭；开启后，只要当前处于高峰时段，**本会话及其委派的子会话**发出的模型请求都会被**暂缓**而不是发出，等到时段转为谷时立刻放行。范围是一棵会话树，而不是整个进程：另一个对话不会因为你在这里等谷时而一起停住。子智能体默认跟随上级——除非它自己的面板里被手动切换过；优先级是「最近的一次手动选择」：本会话有手动选择就听本会话的，否则沿上级找到最近的手动选择，再否则用配置里的默认值。子会话的面板会如实显示「继承」，并说明正在跟随上级会话；父面板的等待数字包含子会话的请求，并注明其中多少来自子会话；而真正另一个对话里的等待，会写成「其他会话还有 N 个请求在等谷时」。请求本身没有任何改动——同样的 messages、同样的工具、同样的字节——所以拿到的还是那个回答，只是按半价计费。
 
-The important part is what the model sees: **nothing**. The gate holds the request at the `llm/stream` waterfall, before any provider dispatch, so no failure is ever reported, no error is appended to the session log, no retry is consumed, and no chunk is injected. From the loop's point of view the call was simply slow. The pill and the panel are the only places the wait is visible, and they show it plainly — the tier, the countdown to the off-peak release, how many requests are parked, and how long the current hold has lasted. While the switch is on and something is parked, the pill gains one more text segment (`¥1.23 · 峰 · 等待谷时`); the segment is words, never colour alone.
+关键在于模型看到了什么：**什么都没有**。闸门挂在 `llm/stream` 瀑布上、早于任何 provider 派发，因此不会报告失败、不会往会话日志追加错误、不会消耗重试次数、也不会注入任何 chunk。从循环的视角看，这次调用只是「慢」。整个等待只在胶囊与面板里可见，并且写得很明白：当前时段、距谷时的倒计时、本会话树有几个请求在等待（并注明其中多少来自子会话）、本次已等待多久。有请求在等时，胶囊会多出「等待谷时」四个字——是文字，不只靠颜色。
 
-Because the switch is a *user* choice, it is not `config`-only: the panel writes it through the plugin's own route, and the host keeps it in `<dsh home>/state/dsh-api-cost/gate.json`, so the position survives a restart. The panel never shows a state the host did not confirm.
+这个开关是**用户针对某个会话的选择**，所以它不只是配置：面板通过插件自己的路由写入，宿主把**按会话**的位置表存在 `<dsh home>/state/dsh-api-cost/gate.json`，因此重启后每个会话的位置都还在。从未被手动切换过的会话树会继承配置里的默认值，并如实标明自己仍在默认状态；子树里被手动切换过的会话则显示「继承」。面板不会显示宿主没有确认过的状态；写入失败时保留原位置，并在旁边显示错误。
 
-Turning the switch off, pressing stop, or unloading the plugin releases every parked request immediately — a hold is cancellable at every instant and can never outlive the reason for it.
+关掉某个会话的开关、按下停止、或卸载插件，都会立即放行真正在等待的请求：关掉只放行这棵会话树里因此解除等待的请求（另有手动选择的子会话保持原样），停止运行或卸载插件放行全部。等待在任何时刻都可取消，也不会比它存在的理由活得更久。
 
 ## HTTP
 
-Two GET-only cost routes on fixed paths, with no configuration knob, plus the gate's control route:
+两条只接受 GET 的成本路径，没有配置项，外加闸门的控制路径：
 
-| Route | Returns |
+| 路由 | 返回 |
 | --- | --- |
-| `/dsh-api-cost/v2/view?session=<id>[&scope=…][&detail=summary\|full][&force=1]` | The unified cost view (ETag; `If-None-Match` answers `304`). |
-| `/dsh-api-cost/v2/pricing` | Current period, next transition, rate card and provenance. |
-| `GET /dsh-api-cost/v2/gate` | The off-peak gate's state (ETag; `If-None-Match` answers `304`). |
-| `POST /dsh-api-cost/v2/gate` | Body `{"enabled":boolean}`; flips the switch and answers the view the host stored. |
+| `/dsh-api-cost/v2/view?session=<id>[&scope=…][&detail=summary\|full][&force=1]` | 统一成本视图（带 ETag，`If-None-Match` 命中返回 `304`）。 |
+| `/dsh-api-cost/v2/pricing` | 当前时段、下次切换、价目表与出处。 |
+| `GET /dsh-api-cost/v2/gate?session=<id>` | 该会话的避开高峰状态（带 ETag，`If-None-Match` 命中返回 `304`）。 |
+| `POST /dsh-api-cost/v2/gate` | 请求体 `{"session":"<id>","enabled":boolean}`；翻转该会话的开关，并返回宿主实际存下的视图。 |
 
-The cost routes are GET-only and reject anything else with `405`. `detail=summary` omits the per-model, roster and recent-call payloads; unknown parameters, scopes or details answer `400`; an unknown session answers `404`; a cross-site fetch is refused with `403`; a read that outlives its 8-second budget answers `503`. The gate's `POST` is the one mutating surface, so it is guarded before the body is read: `sec-fetch-site` outside `same-origin`/`none` is refused with `403`, a body that is not `application/json` with `415`, an `Origin` that does not match the request's `Host` with `403`, and a body that is not exactly `{"enabled":boolean}` within 4096 bytes with `400`. No response ever carries a local path.
+`detail=summary` 不下发按模型、名单与最近调用。成本路径只接受 GET，其余方法返回 `405`；未知参数、范围或 detail 返回 `400`；会话不存在返回 `404`；跨站请求返回 `403`；超过 8 秒预算的读取返回 `503`。闸门读取要求恰好一个 `session` 查询参数，缺失或非法返回 `400`；每个会话的视图有自己的 `ETag`，两个会话不会共用同一份缓存状态。
 
-## Rates
+闸门的 `POST` 是全插件唯一的写入面，因此在读取请求体之前就完成校验：`sec-fetch-site` 不在 `same-origin`/`none` 内返回 `403`，请求体不是 `application/json` 返回 `415`，`Origin` 与请求的 `Host` 不一致返回 `403`，请求体不是恰好 `{"session":"<id>","enabled":boolean}` 或超过 4096 字节返回 `400`——会话 id 非法或多了别的键都不会改变任何状态。响应里不含本机路径。
 
-Published DeepSeek prices, in force from 2026-09-10 12:00 +08:00 (CNY per million tokens):
+## 费率
 
-| Model | Period | Cache hit | Cache miss | Output |
+DeepSeek 官方公布价格，2026-09-10 12:00 +08:00 起生效（元 / 百万 tokens）：
+
+| 模型 | 时段 | 缓存命中 | 缓存未命中 | 输出 |
 | --- | --- | --- | --- | --- |
-| `deepseek-flash` | peak | 0.04 | 2 | 8 |
-| `deepseek-flash` | off-peak | 0.02 | 1 | 4 |
-| `deepseek-v4-pro` | peak | 0.30 | 9 | 27 |
-| `deepseek-v4-pro` | off-peak | 0.15 | 4.5 | 13.5 |
+| `deepseek-flash` | 高峰 | 0.04 | 2 | 8 |
+| `deepseek-flash` | 空闲 | 0.02 | 1 | 4 |
+| `deepseek-v4-pro` | 高峰 | 0.30 | 9 | 27 |
+| `deepseek-v4-pro` | 空闲 | 0.15 | 4.5 | 13.5 |
 
-The published USD column is billed as its own column, never converted at a guessed rate. Peak windows are Monday–Friday 09:00–12:00 and 14:00–18:00 Beijing time, excluding statutory holidays; nights, weekends, holidays and 调休 makeup days are off-peak. Money accumulates in exact integer arithmetic (nano-units) and only rounds for display. Years missing from the holiday table resolve **off-peak** and are reported as `holiday-data-missing`.
+$ 列按官方单独公布的美元价计算，不做猜测汇率换算。高峰为北京时间周一至周五 09:00–12:00 与 14:00–18:00（不含法定节假日）；夜晚、周末、节假日与调休上班日都是空闲价。金额用精确整数（纳元单位）累计，只在展示时舍入。节假日表未收录的年份按**空闲价**估算，并标为 `holiday-data-missing`。
 
-## Configuration
+## 配置
 
-In the profile patch:
+在 profile 补丁里：
 
 ```yaml
 - id: dsh-api-cost
   name: 'dsh-api-cost'
   config:
     defaultScope: auto          # auto | self | tree | team
-    tool: true                  # register session_cost
-    command: true               # register /cost
-    holidays:                   # extend or correct the bundled Chinese calendar
+    tool: true                  # 注册 session_cost
+    command: true               # 注册 /cost
+    holidays:                   # 追加或修正内置的中国法定节假日日历
       '2027':
         holidays: ['2027-01-01', ['2027-02-05', '2027-02-11']]
         makeupWorkdays: ['2027-02-20']
-    gate:                       # the off-peak request gate; the panel owns the switch
-      enabled: false            # initial position, used only when nothing is stored yet
-      persist: true             # keep the position across restarts
-      path: ~                   # override <dsh home>/state/dsh-api-cost/gate.json
+    gate:                       # 按会话树生效的避开高峰闸门；每个会话的面板有一个开关，作用于本会话及其子会话
+      enabled: false            # 从未被手动切换过的会话所用的默认位置
+      persist: true             # 跨重启保留每个会话的位置
+      path: ~                   # 覆盖 <dsh home>/state/dsh-api-cost/gate.json
       models: all               # all | priced
 ```
 
-Changing `holidays` changes the projection's fold identity, so stale checkpoints are discarded and rebuilt instead of being mixed with new money.
+修改 `holidays` 会改变投影的折叠身份，因此旧检查点会被丢弃重建，而不会与新的金额混在一起。
 
-`gate.enabled` is only a **default**: once the panel has stored a position, that position wins on every later start, because the user's choice is the authority, not the profile file. Set `gate.persist: false` to keep the switch in memory only.
+`gate.enabled` 只是一个**默认值**：某个会话一旦在面板里存下过手动选择，本会话及其子树此后每次启动都按它算——这是用户的选择，它比 profile 文件更有权威；子会话若自己存过手动选择，则以更近的那次为准。从未被切换过的会话树继续继承默认值。只有手动选择会被持久化（按会话 id），父子关系每次运行从活跃会话恢复；进程全局设计留下的 version 1 状态文件会被忽略，而不是去猜它属于谁，因此升级后每个会话树都从配置的默认值开始。设 `gate.persist: false` 则所有位置只存在于内存。
 
-`gate.models: priced` narrows the gate to ids the published card actually prices. The default, `all`, holds every model request — a subscription-backed or third-party route has no peak column to save on, so on a composition that mixes them, `priced` avoids delaying calls that gain nothing.
+`gate.models: priced` 把闸门收窄到价目表确实计价的 id。默认的 `all` 会暂缓被开启会话树的每一个模型请求；订阅制或第三方路由没有高峰列可省，因此在一个混合了它们的组合里，用 `priced` 可以避免白白拖延那些省不到钱的调用。
 
-## What it does not promise
+## 它不承诺什么
 
-- **It is an estimate, not a bill.** Only published rates and reported token counts are used; grants, discounts, retry billing and third-party routing are invisible here.
-- **Only official DeepSeek models are priced.** An unknown id is recorded as `unknown-model` with zero money rather than guessed.
-- **A settlement is billed at its settlement time.** A call that crosses a boundary is not split proportionally, because the official documentation defines no such split.
-- **Unreadable sessions are reported, not guessed**: they appear as `session-unavailable` with `coverage.status = partial`, and a traversal that exceeds the 400-session budget is marked `scope-truncated`.
-- **A malformed usage report is never billed.** The call is counted as an attempt and flagged `invalid-usage` or `missing-usage`, but it adds no money and no tokens, so a total never contains spend that no priced call explains.
-- **The Pro routing caveat is a rate-card note, not a coverage gap.** This repository records that official billing for `deepseek-v4-pro` after 2026-09-14 12:00 +08:00 is disputed (whether those requests are served — and billed — as Flash, or keep the Pro column). The plugin cannot verify the provider's policy, so it prices the published Pro column and says so. That note appears **only when the scope actually priced that model**; other card caveats (missing holiday data, calls predating the card) always show, because they shape the rates and period on display.
-- **Fork semantics are explicit**: a forked child's own figure excludes the inherited prefix, so ancestors are not billed twice when you look at a branch.
+- **是估算，不是账单。** 只用官方价目表与上报的 token 数；赠送余额、优惠、失败重试的真实扣费与第三方路由在这里看不到。
+- **只给 DeepSeek 官方模型计价。** 未知 id 记为 `unknown-model` 且金额为 0，不猜价。
+- **按结算时刻计价。** 跨时段的那一次调用不做按时长比例拆分，因为官方文档未规定这种拆法。
+- **读不到的会话如实上报**：标为 `session-unavailable` 且 `coverage.status = partial`；遍历超过 400 个会话的预算时标为 `scope-truncated`。
+- **畸形的用量报告一律不计价。** 该调用只计为一次 settlement，并标记 `invalid-usage` 或 `missing-usage`，金额与 token 都不入账，因此总额里不会出现没有任何已计费调用解释的支出。
+- **V4 Pro 的路由口径是价目表提示，不是覆盖缺口。** 本仓库记录：2026-09-14 12:00 +08:00 之后官方对 `deepseek-v4-pro` 的计费口径存在冲突（这些请求是被当作 Flash 服务并按 Flash 计费，还是保持 Pro 列）。插件无法核实厂商口径，因此按公布的 Pro 列计价并如实标注。该提示现在**只在这个范围确实给该模型计过价时出现**；其它价目表提示（节假日数据缺失、调用早于价目表）始终显示，因为它们影响正在展示的费率与时段。
+- **fork 语义明确**：被 fork 的子会话自身数字不含继承前缀，所以看某一分支时不会重复计入祖先。
 
-And about the Avoid-peak switch specifically:
+另外，关于「避开高峰」开关本身：
 
-- **It holds calls; it does not split them.** A request that is already in flight when peak begins is unaffected, and a call that starts off-peak but settles in peak is still billed at peak, because the settlement instant decides the rate and it cannot be known before dispatch.
-- **A hold can be long.** A weekday window is up to four hours (09:00–12:00, 14:00–18:00), so the session will look idle while the pill explains why. Nothing is lost: the request is sent unchanged the moment the window closes, and pressing stop releases it at once.
-- **It is per process.** Two DSH processes hold their own parked requests; the switch position is shared through the state file, the holds are not.
-- **Its durable flag is a file, not a database.** `<dsh home>/state/dsh-api-cost/gate.json`, written atomically. If it cannot be read or written, the switch still works for the current run and the panel reports it as not durable rather than failing.
-- **Failures fail open.** The gate is built so that it cannot break a model call: an unreadable clock, an unreadable tier or a timer that will not arm all release the request immediately. The failure mode of this feature is "you paid peak prices", never "your session stopped".
+- **它只暂缓，不拆分。** 高峰开始时已经在飞的请求不受影响；在谷时发出、却在高峰结算的调用仍按高峰计价，因为费率由结算时刻决定，而派发前无法预知。
+- **等待可能很长。** 一个工作日窗口最长四小时（09:00–12:00、14:00–18:00），这段时间会话看起来是空闲的，胶囊会解释原因。不会丢东西：窗口一关，请求原样发出；按停止则立即放行。
+- **开关按会话树生效，进程是边界。** 两个 DSH 进程各自持有自己的等待请求；手动选择按会话 id 存在同一个状态文件里，同一 profile 下的会话共享这个文件，而在飞的等待永远不会离开创建它的进程。
+- **无关会话不受影响，子会话可以单独覆盖。** 一棵会话树的开关不会波及另一个对话；子智能体默认跟随上级，但它在自己面板里存下的手动选择优先，并且只覆盖它自己的子树。
+- **父子链是运行期信息，不落盘。** 新进程里，会话树随着会话被创建或查询而重建；对于插件尚未观察到的会话，它暂时被当作根（只按它自己或配置默认值处理）。所以在一个父会话里打开开关，要到父子关系可被观察之后才会覆盖已存在的子会话。
+- **它的持久化是一个文件，不是数据库。** `<dsh home>/state/dsh-api-cost/gate.json`，原子写入，内容只是各会话的版本化手动选择映射（最多存 512 个会话，满了先淘汰最早更改的）。内存里还有界：最多记 1024 个会话状态和 4096 条父子链，极端压力下非活跃记录会被逐出，手动选择会从持久化文件读回、父子链会从活跃会话重新学习。读写失败时开关本次运行照常可用，面板会如实显示为不可持久化，而不是报错。进程全局设计写下的 version 1 文件会被忽略，绝不猜测。
+- **失败一律放行。** 闸门的设计前提是「不可能弄坏一次模型调用」：时钟读不到、时段读不到、定时器装不上，都会立即放行。这个功能的失败模式是「你按高峰价付了钱」，永远不会是「你的会话卡住了」。
 
-## Development
+## 开发
 
 ```sh
-pnpm install --ignore-scripts     # dev-only toolchain
-pnpm typecheck                    # strict TypeScript over src, test and scripts
-pnpm build                        # dist/index.js, dist/client.js, dist/types
-pnpm test                         # builds, then runs the Node suite over *.test.ts
-pnpm bench                        # size/state budgets plus machine-calibrated timing budgets
+pnpm install --ignore-scripts     # 仅开发工具链
+pnpm typecheck                    # 对 src、test、scripts 做严格类型检查
+pnpm build                        # 产出 dist/index.js、dist/client.js、dist/types
+pnpm test                         # 先构建，再对 *.test.ts 跑 Node 测试
+pnpm bench                        # 体积/状态预算，加上按机器自校准的耗时预算
 ```
 
-| Path | Role |
+| 路径 | 作用 |
 | --- | --- |
-| `src/pricing/` | Rate card, holiday calendar, exact BigInt pricing engine. |
-| `src/host/projection.ts` | The pure `apiCost` fold and its wire schema. |
-| `src/host/query.ts` | Scope resolution, single-flight aggregation, bounded caches. |
-| `src/host/gate.ts` | The off-peak hold state machine, its durable flag and the `llm/stream` middleware. |
-| `src/host/http.ts` | The cost routes, the gate's read/write route, validation and the error taxonomy. |
-| `src/client/` | TSX pill and panel, projection seats, the scope bridge and the gate store. |
-| `test/` | Node-native TypeScript tests: pricing, client bridge, release contract, host integration, gate hold/wire, and one real-cordis waterfall test. |
-| `scripts/build.ts` | esbuild host/client plus declaration emission. |
-| `docs/baseline.json` | Recorded 1.0.0 measurements the budget gate compares against. |
-| `docs/off-peak-gate.md` | The gate's frozen interface and the reasoning behind each clause. |
-| `docs/verification-gate.md` | Claim-by-claim verification record for the gate, with the falsification runs. |
+| `src/pricing/` | 价目表、节假日日历、精确 BigInt 计价引擎。 |
+| `src/host/projection.ts` | 纯 `apiCost` 折叠与其 wire schema。 |
+| `src/host/query.ts` | 范围解析、单飞聚合、有界缓存。 |
+| `src/host/gate.ts` | 按会话树生效的避开高峰等待状态机、持久化位置表、活父子链缓存（`session/created`）与 `llm/stream` 中间件。 |
+| `src/host/http.ts` | 成本路由、闸门读写路由、参数校验与错误分类。 |
+| `src/client/` | TSX 胶囊与面板、投影座位、跨会话查询桥与闸门 store。 |
+| `test/` | Node 原生 TypeScript 测试：计价、客户端桥、发布契约、宿主集成、闸门等待/接口、一个真实 cordis 瀑布测试，以及两份独立、按声明优先的验证套件（`test/gate-sessions.test.ts` 覆盖 v2.2 按会话口径，`test/gate-tree.test.ts` 覆盖 v2.3 按会话树口径）。 |
+| `scripts/build.ts` | esbuild 宿主/客户端与声明文件输出。 |
+| `docs/baseline.json` | 记录下来的 1.0.0 基准，供体积/性能门禁比较。 |
+| `docs/off-peak-gate.md` | 闸门的冻结接口，以及每条约定的理由。 |
+| `docs/verification-gate.md` | 闸门逐条断言的验证记录，含变异证伪结果。 |
 
-Measured on Node 24.21 against the recorded 1.0.0 baseline and the same fixtures: 100k settlements price in **11 ms** (was 22.7 ms), a 71-session historical tree aggregates completely in **1.4 ms** cold and **0.05 ms** warm, per-session projection state stays under **6 KiB** after 100k settlements, and the shipped bundles are **11.3 KiB** (client) and **13.1 KiB** (host) gzip — the growth over the pre-gate 9.6 / 10.3 KiB is the Avoid-peak surface: a second client store, the panel switch and its status rows, the bilingual copy, and the gate itself.
+在 Node 24.21 上、与记录的 1.0.0 基准相同夹具测得：10 万次结算计价 **11 ms**（原 22.7 ms）；71 个会话的历史树冷读 **1.4 ms**、热读 **0.05 ms** 且完整汇总；10 万次结算后每会话投影状态仍低于 **6 KiB**。2.3 的产物为客户端 **13.7 KiB**、宿主 **15.0 KiB**（gzip）：相对加闸门前的 9.6 / 10.3 KiB，长出来的部分是按会话树生效的闸门（按会话的客户端 store、持久化的手动选择、父子链解析及其线路）与峰谷台账面板重设计（面板的单一时钟、峰谷条、闸门区块与更大的双语文案）；两者都仍在 `test/build.test.ts` 与 `scripts/bench.ts` 断言的硬性体积预算之内。
 
-## Migrating from 1.x
+## 从 1.x 迁移
 
-2.0 is a deliberate breaking release: no legacy routes, parameters, configuration keys or data shapes are kept.
+2.0 是刻意的破坏性版本：不保留旧路由、旧参数、旧配置键与旧数据结构。
+
+从 **2.1 升到 2.2** 有两处刻意的不兼容，都在闸门上：`GET /dsh-api-cost/v2/gate` 必须带 `?session=<id>`；`POST /dsh-api-cost/v2/gate` 的请求体从 `{"enabled":boolean}` 变成 `{"session":"<id>","enabled":boolean}`。version 1 的闸门状态文件会被忽略（进程全局的标记无法归到某个会话），因此每个会话都从配置的 `gate.enabled` 默认值开始，直到再次被切换。
+
+从 **2.2 升到 2.3** 改的是闸门的作用范围与视图字段，路由形状不变：一次开关从「只影响一个会话」变成「影响本会话及其委派的子会话」，无关会话照样互不影响。`GateView` 升到 schemaVersion 4，新增 `source`（`self` / `inherited` / `default`）与 `inheritedFrom`，并把 `holding` / `since` / `releaseAt` / `heldTotal` / `delayedMs` 改为**会话树聚合**、新增本会话自身的 `ownHolding`；`otherHolding` 现在指会话树之外的等待请求。状态文件仍是 version 2，只存各会话的手动选择，父子关系从运行中的会话恢复。
 
 | 1.x | 2.0 |
 | --- | --- |
-| `GET /dsh-api-cost/api`, `/api/session`, `/api/status`, `/api/reconcile` | `GET /dsh-api-cost/v2/view`, `/v2/pricing`, `/v2/gate` |
-| `tree=0`, `scope=corpus`, `force` on every route | `scope=self\|tree\|team`, `force=1` on `/view` |
-| `routePrefix` configuration | fixed `/dsh-api-cost/v2` |
-| Plugin-side log replay, LRU ledgers, recount button | Host projection, durable checkpoint, Refresh |
-| Plain-number money | Exact decimal strings folded from BigInt nano-units |
-| `index.mjs`, `client.js`, `lib/pricing.mjs` | `src/**/*.ts(x)` compiled to `dist/` |
+| `GET /dsh-api-cost/api`、`/api/session`、`/api/status`、`/api/reconcile` | `GET /dsh-api-cost/v2/view`、`/v2/pricing`、`/v2/gate` |
+| `tree=0`、`scope=corpus`、每条路由都可 `force` | `scope=self\|tree\|team`，仅 `/view` 支持 `force=1` |
+| `routePrefix` 配置 | 固定 `/dsh-api-cost/v2` |
+| 插件侧日志重放、LRU 账本、重新统计按钮 | 宿主投影、持久检查点、刷新 |
+| 普通浮点金额 | 由 BigInt 纳元单位折叠出的精确十进制字符串 |
+| `index.mjs`、`client.js`、`lib/pricing.mjs` | `src/**/*.ts(x)` 编译到 `dist/` |
 
-## License
+## 许可
 
-MIT — see [LICENSE](LICENSE).
+MIT，见 [LICENSE](LICENSE)。

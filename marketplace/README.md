@@ -58,7 +58,7 @@ repository and checks every claim in the description against the code.
 | `cordis.patch.yml` at root | present |
 | Repo is public and not archived | yes |
 | `dsh-plugin` GitHub topic | set (plus `dsh`, `dsh-plugin-market`, …) |
-| Real, working code | 117 tests pass locally; prebuilt `dist/` tracked |
+| Real, working code | 215 tests pass locally; prebuilt `dist/` tracked |
 | Repo at least 1 day old | created `2026-10-07T14:28:56Z`; **eligible from `2026-10-08T14:28:56Z`** |
 | ≤ 3 entries per PR | 1 entry |
 | Statistically accurate description | every clause verified against `src/` |

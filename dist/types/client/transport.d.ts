@@ -11,7 +11,11 @@ export declare const validTotals: (v: unknown) => v is Totals;
 export declare function validLedger(v: unknown): v is LedgerView;
 export declare function validCostView(v: unknown): v is CostView;
 export declare function validPricingView(v: unknown): v is PricingView;
-/** The off-peak gate control surface: exact enums, non-negative counters, nullable instants. */
+/**
+ * The per-session off-peak gate control surface (schema version 4): exact enums,
+ * a source consistent with `inheritedFrom`, subtree counters that cannot invert,
+ * non-negative counters and nullable instants.
+ */
 export declare function validGateView(v: unknown): v is GateView;
 /** v2 transport: cost, pricing and gate reads, plus the single gate mutation. */
 export declare class CostTransport {
@@ -21,7 +25,7 @@ export declare class CostTransport {
     private post;
     view(sessionId: string, scope: Scope, detail: Detail, signal: AbortSignal): Promise<CostView>;
     pricing(signal: AbortSignal): Promise<PricingView>;
-    gate(signal: AbortSignal): Promise<GateView>;
+    gate(sessionId: string, signal: AbortSignal): Promise<GateView>;
     /** The one mutation: the published value is the host's answer, never the request's. */
-    setGate(enabled: boolean, signal: AbortSignal): Promise<GateView>;
+    setGate(sessionId: string, enabled: boolean, signal: AbortSignal): Promise<GateView>;
 }

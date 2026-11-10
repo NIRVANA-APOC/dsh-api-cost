@@ -135,11 +135,13 @@ queries.dispose()
 /* ---- artifact weight --------------------------------------------------- */
 const weight = (path: string): { raw: number; gzip: number } => { const bytes = readFileSync(join(root, path)); return { raw: bytes.length, gzip: gzipSync(bytes, { level: 9 }).length } }
 const client = weight('dist/client.js'), host = weight('dist/index.js')
-// 12 KiB, up from 10 KiB: the off-peak gate adds a second client store plus the
-// panel's switch and status rows. The number is duplicated in test/build.test.ts;
-// change both together or the two gates disagree.
-check('client-budget', client.gzip <= 12288, `${client.gzip} B gzip (${client.raw} B raw) vs legacy ${baseline.artifacts.client.gzipBytes} B`)
-check('host-budget', host.gzip <= 20480, `${host.gzip} B gzip (${host.raw} B raw) vs legacy ${baseline.artifacts.host.gzipBytes + baseline.artifacts.pricing.gzipBytes} B`)
+// 15 KiB client / 16 KiB host: 2.2 made the gate per-session and rebuilt the panel
+// as a tariff ledger; 2.3 makes its scope a conversation tree (parent links,
+// subtree aggregation, inheritance states). Both are still budgeted hard, not
+// compared against themselves — the numbers are duplicated in test/build.test.ts;
+// change the two together or the gates disagree.
+check('client-budget', client.gzip <= 15360, `${client.gzip} B gzip (${client.raw} B raw) vs legacy ${baseline.artifacts.client.gzipBytes} B`)
+check('host-budget', host.gzip <= 16384, `${host.gzip} B gzip (${host.raw} B raw) vs legacy ${baseline.artifacts.host.gzipBytes + baseline.artifacts.pricing.gzipBytes} B`)
 
 console.log('\n' + JSON.stringify({ priceMs100k: Number(priceMs.toFixed(1)), foldMs100k: Number(foldMs.toFixed(0)), stateBytes, coldTreeMs: Number(coldMs.toFixed(1)), warmTreeMs: Number(warmMs.toFixed(2)), clientGzip: client.gzip, hostGzip: host.gzip, failures }, null, 2))
 if (failures.length) { console.error('Benchmark budgets failed: ' + failures.join(', ')); process.exitCode = 1 }

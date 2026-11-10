@@ -561,9 +561,10 @@ test('the host half exports the Cordis entry contract and registers one tool and
   assert.equal(h.tools[0].name, 'session_cost')
   assert.equal(h.commands.length, 1, 'apply must register the /cost command through ctx.inject([\'commands\'])')
   assert.equal(h.commands[0].name, 'cost')
-  // Six from the fold, the invalidation feed and the three cost routes; two more from
-  // the off-peak gate: its own lifetime plus the gate route it publishes.
-  assert.equal(h.effectDisposers.length, 8, 'apply must register every lifecycle it creates as a ctx.effect disposer')
+  // Six from the fold, the invalidation feed and the three cost routes; three more
+  // from the off-peak gate: its own lifetime, the gate route it publishes and the
+  // session/created listener that keeps its parent links current.
+  assert.equal(h.effectDisposers.length, 9, 'apply must register every lifecycle it creates as a ctx.effect disposer')
 })
 
 test('a settled call is priced at the instant its event recorded, peak and off-peak separately', async () => {
@@ -1261,7 +1262,7 @@ test('every effect disposer is usable; disposal removes the routes, aborts in-fl
   h.addSession('life-1', { events: [messageEvent(0, PEAK, 'deepseek-flash', REAL_USAGE)] })
   const healthy = await request(h, VIEW, 'session=life-1')
   assert.equal(healthy.status, 200)
-  assert.equal(h.effectDisposers.length, 8, 'apply must expose a disposer per effect it registered')
+  assert.equal(h.effectDisposers.length, 9, 'apply must expose a disposer per effect it registered')
 
   const viewHandler = h.routes.get(VIEW)
   assert.ok(viewHandler !== undefined, 'the view route must be registered before disposal')

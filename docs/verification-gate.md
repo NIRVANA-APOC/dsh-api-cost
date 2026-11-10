@@ -1,17 +1,28 @@
 # Off-peak gate — independent verification (T4)
 
-Verifier: `gate-verify`. Status: **complete for the A/B/C matrix; no defect found in `src/**`.**
+Verifier: `gate-verify`. Status: **v2.1.0 process-global run complete for the
+A/B/C matrix; no defect found in `src/**`. v2.2.0 per-session revision: claim
+suite updated and extended, see the addendum in §6. v2.3.0 conversation-tree
+revision: scope re-expressed as one session and its delegation subtree, claim
+suite extended with A20–A26 / C9–C10, see the addendum in §7.**
 Scope of this file: claim → test → verdict, every defect with coordinates, the exact
 commands, and the output tail. This report is evidence, not a summary: where a
 claim is not proven, it says so.
+
+**§1–§5 are the historical v2.1.0 report.** They describe the process-global gate
+that shipped in v2.1.0; their wording ("the flag", "every parked request") is
+**superseded** by the per-session contract in §6 and by the conversation-tree
+contract in §7 (and by `docs/off-peak-gate.md` §4/§5). They are kept because they
+are the record of the run that established the design; §6 and §7 are the current
+claim matrices.
 
 Artifacts produced by this task:
 
 | File | What it holds |
 | --- | --- |
-| `test/gate.test.ts` | A1–A14, B1–B5, E1–E3 — the hold state machine, the durable flag, the `/gate` wire, and the wiring facts the claims rest on |
-| `test/gate-integration.test.ts` | C1–C7 — a REAL cordis `Context` + REAL `@deepseek-ai/dsh-llm` `LlmRuntime` + stub adapter + the real gate |
-| `docs/verification-gate.md` | this report |
+| `test/gate.test.ts` | A1–A26, B1–B5, E1–E3 — the hold state machine, the durable store, the conversation-tree scope (A20–A26), the session-keyed `/gate` wire, and the wiring facts the claims rest on |
+| `test/gate-integration.test.ts` | C1–C10 — a REAL cordis `Context` + REAL `@deepseek-ai/dsh-llm` `LlmRuntime` + stub adapter + the real gate, including the unrelated-conversation C8 claim and the delegation-tree C9/C10 claims |
+| `docs/verification-gate.md` | this report, with the v2.2.0 addendum in §6 and the v2.3.0 addendum in §7 |
 
 Method: every test drives the real `src/host/gate.ts` and the real `/gate` route
 (through `apply()` on a fake `webServer`, in the style of `test/host.test.ts`).
@@ -22,11 +33,16 @@ about billing. No test reads the real clock.
 
 ---
 
-## 1. Verdict table
+## 1. Verdict table (v2.1.0 process-global run — superseded in scope by §6)
 
 Verdicts: **verified** = a test that fails when the claim is false, and the
 failure was demonstrated with a mutation (see §3). **unknown** = not proven, with
 the reason stated in §4.
+
+> Historical note: the v2.1.0 gate was one process-wide switch. Every claim in
+> this table was re-expressed for an explicit session argument in the v2.2.0
+> revision, and the per-session matrix in §6 is authoritative; the rows below are
+> the original wording, not the current contract.
 
 | # | Claim | Test | Verdict |
 | --- | --- | --- | --- |
@@ -280,3 +296,222 @@ Two mechanics worth knowing, both confirmed by that probe and relied on by C:
   `cannot get property "llm" without inject` unless the plugin declares
   `inject: ['llm']`. `src/host/index.ts` correctly never reads `ctx.llm`; it only
   registers the listener.
+
+---
+
+## 6. Addendum — v2.2.0 per-session gate
+
+Superseding scope: `GateView` is schemaVersion 3; the switch, the hold registry,
+the counters, the durable file and both HTTP methods are **session-keyed**. Every
+v2.1.0 claim was re-expressed for an explicit session argument (`S = 'session-a'`,
+`T = 'session-b'` in `test/gate.test.ts`), the claims that only exist once two
+sessions can disagree are A15–A18 / C8, and A19 covers the bounded-state budget.
+Nothing was deleted or weakened: each old claim keeps its assertion set, now
+driven through `gate.view(S)`, `gate.setEnabled(S, …)`, `gate.wait(S, …)` and
+`middleware({ sessionId: S })`.
+
+### 6.1 Added and changed claims
+
+| # | Claim | Test | Verdict |
+| --- | --- | --- | --- |
+| A15 | Enabling one session parks only that session; another session's middleware returns the identical `next()` object while the first holds, and a session-less call is never gated | `A15 — enabling one session parks only that session; another session and a session-less call stay identical` | verified |
+| A16 | Two sessions hold independently, counters/windows/revisions isolated; `setEnabled(A,false)` releases only A's holders, B stays parked and counted | `A16 — two sessions hold independently; counters are isolated and switching one off releases only its holders` | verified |
+| A17 | Per-session durability round-trips independently; a legacy v1 file is ignored and upgraded; an unwritable path degrades without throwing; the file keeps at most 512 sessions evicting the oldest `changedAt` first | `A17 — per-session durability: choices round-trip independently, a legacy v1 file is ignored, an unwritable path degrades, and the file keeps at most 512 sessions` | verified |
+| A18 | GET without a session is 400 `INVALID_SESSION`; one session per read (unknown/duplicate query key is 400); each session has its own ETag; POST flips only its named session; malformed session id is `INVALID_SESSION`, missing key is `INVALID_BODY` | `A18 — the gate read is per-session: a missing session is a 400, each session has its own ETag, and a POST flips only its named session` | verified |
+| A19 | In-memory session state is bounded at 1024 records: inherited records are evicted before an explicit choice, and under real pressure the oldest-touched explicit record goes; the rebuilt record reports the inherited default again | `A19 — in-memory session state is bounded: an inherited record is evicted before an explicit choice, and the oldest-touched record goes under real pressure` | verified |
+| A1–A14 | The v2.1.0 hold/fail-open/durable claims, re-expressed with a session argument (same assertions, plus session-scoped views) | `A1`…`A14b` | verified |
+| A13 | …and `revision` now also folds `sessionId` (two sessions never share an ETag) | `A13`, `A18`, `B1` | verified |
+| A14 | Durable test now asserts the v2 file shape (`{"version":2,"sessions":{…}}`), the stored `changedAt` restoring, and the per-session inherited default (`changedAt:null, durable:false`) | `A14` | verified |
+| B1–B5 | The v2.1.0 wire claims, re-expressed with `?session=<id>` reads and `{"session":…,"enabled":…}` writes; the guard order is unchanged | `B1`…`B5` | verified |
+| E2 | `apply()` still registers exactly one prepended `llm/stream` listener and the `/gate` route over one gate; a session-less call bypasses by identity, and flipping one session off is visible to the listener while another session still inherits the configured default | `E2 — apply() registers the llm/stream listener and the /gate route over one per-session gate` | verified |
+| E3 | `/view` and `/pricing` stay GET-only; the cross-site gate read (with a session) is still refused | `E3` | verified |
+| C1–C7 | The real-framework claims, with a real `GenerateOptions.sessionId` threaded through every call; C1/C2 also assert the adapter receives the stamped session id | `C1`…`C7` | verified |
+| C8 | Two concurrent real `ctx.llm.stream()` calls with different session ids: only the enabled session parks; the other reaches the adapter while the first is still parked, and only the enabled one moves to the boundary | `C8 — two concurrent real calls with different sessions: only the enabled session parks, the other dispatches while it waits` | verified |
+
+### 6.2 Historical clauses explicitly superseded
+
+| v2.1.0 clause | Superseded by |
+| --- | --- |
+| "the [one] stored flag", `GateStore.read()` / `write(enabled)` | §4 `read(sessionId)` / `write(sessionId, enabled)`; A15–A17 |
+| `GateView` schemaVersion 2 without `sessionId`/`otherHolding`, `changedAt: number` | v3 with `sessionId`, nullable `changedAt`, `otherHolding`; A18, B1 |
+| `revision` without a session component, so one ETag validated every read | `revision` folds `sessionId`; A13, A18, B1 |
+| "`setEnabled(false)` releases the parked waiter" (all of them) | releases only that session's holders; A7, A16 |
+| `GET /gate` with no parameters and `POST {"enabled":…}` | `?session=<id>` and `{"session":<id>,"enabled":…}`; A18, B1–B4 |
+| v1 file `{"version":1,"enabled":…}` preferred over `config.enabled` | v1 files are ignored (unattributable), v2 written; A14, A17 |
+| "The gate is per process" (limitation) | per session; per-process runtime state only, durable state per session; `docs/off-peak-gate.md` §8 |
+
+### 6.3 Commands and verdict (this revision)
+
+```
+node --test --test-isolation=none --test-concurrency=1 test/gate.test.ts test/gate-integration.test.ts
+```
+
+```
+ℹ tests 39
+ℹ suites 0
+ℹ pass 39
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 383.646472
+```
+
+(Typecheck is covered by the repository-wide `pnpm typecheck`; the claim suites
+above import the production modules directly, so a type or interface mismatch fails
+the run rather than the build step. No test reads the real clock and no test sleeps
+in real time; the only real timer is the per-assertion `withDeadline` guard whose
+job is to turn a hang into a failure.)
+
+### 6.4 Limitations of this addendum
+
+1. The v2.1.0 mutation matrix (§3) was not re-run for v2.2.0; the claim suites
+   themselves are the regression net, and the Lead runs `pnpm test`/`pnpm check`
+   on the final tree (which now also requires `pnpm build` before the suites that
+   read `dist/`).
+2. The 512-session durable bound is asserted end-to-end by A17; the
+   1024-session in-memory bound is asserted by A19 (an explicit choice survives
+   inherited pressure first, then the oldest-touched record goes). The eviction
+   order was found by writing A19: the first implementation could evict the very
+   record it had just created before `setEnabled` marked it explicit, which made
+   `view()` silently lose a switch under pressure. The fix prepares the choice
+   before the record joins the bounded map; A19 is the regression test.
+   The independent v2.3 verifier suite (`test/gate-tree.test.ts`, V12–V19) also
+   passes 8/8 on the final tree, with an 11-mutation falsification run (subtree
+   counters, ancestor walk, `otherHolding`, release scope, revision folds, link
+   learning, cache bounds, `session/created` teaching) caught by named tests.
+3. The client half (session-keyed `GateStore`) is T2's surface; this suite only
+   asserts that the host's GET/POST bodies satisfy the shared `validGateView`.
+
+### 6.5 Independent verifier artifact (v2.2.0; updated in place for v4)
+
+A second, claim-first suite was written by an independent verifier against the
+frozen contract rather than against the implementation: `test/gate-sessions.test.ts`
+(19 tests, V1–V11b, self-contained doubles, deterministic hand-drained clock). It
+is glob-captured by the repository command
+`node --test test/*.test.ts`, so it is part of every full run, not an optional
+extra. For v2.3 the verifier updated it in place to the v4 view shape: the claims
+are now framed as the **root-session half** of the tree contract (two unrelated
+root conversations never affect each other), with `source`/`inheritedFrom`/
+`ownHolding` asserted throughout. On the final tree it reports 19/19 pass, and a
+9-mutation falsification pass against it was caught by named tests.
+
+Falsification was re-run on that suite against a scratch copy of the tree (never
+the repository): 15 deliberate breaks, 14 caught by at least one V test —
+per-session enable bypass, release-all on disable, `otherHolding` pinned to zero,
+global counters, the durable file written as v1, the 512 cap removed, `revision`
+without `sessionId`, `revision` folding the wall clock, GET without a session
+accepted, POST ignoring the body session, `view()` writing the store, the
+in-memory cap removed, a disabled session still parking, and `wait()` checking
+`explicit` instead of `enabled`. The fifteenth (removing `planHold`'s outer
+`catch`) is an equivalent mutant: the inner `tryNow()`/`tier()` catches and the
+middleware's own boundary catch make it unreachable; the reachable compound
+variant, with both fail-open layers removed, is caught by V9a.
+
+Known limitation restated, not a defect: the 1024-record in-memory cap can evict
+an explicit non-durable switch (`persist:false`) if one process touches more than
+1024 sessions. The cap is a memory bound, the durable file is the record of a
+user's choice, and both are documented in `docs/off-peak-gate.md` §8.
+
+---
+
+## 7. Addendum — v2.3.0 conversation-tree gate
+
+Superseding scope: `GateView` is schemaVersion 4 and a switch now governs **the
+session it was flipped in and that session's delegation subtree**, while an
+unrelated conversation keeps its own position. `enabled` is the *effective*
+position, `source` says where it came from (`self` / `inherited` / `default`),
+`inheritedFrom` names the nearest explicitly-switched ancestor, `ownHolding` is the
+session's own parked count, and `holding`/`since`/`releaseAt`/`heldTotal`/`delayedMs`
+aggregate over the tracked subtree with `otherHolding` counting requests parked
+outside it. Delegation links are live runtime state (`session/created` plus a
+synchronous `parentOf` fallback); the version-2 durable file still stores explicit
+per-session choices only. §4 and §5 of `docs/off-peak-gate.md` are the current
+contract; the v2.2.0 contract is its Appendix B.
+
+Every v2.2.0 claim (A1–A19, B1–B5, E1–E3, C1–C8) is kept green by the same
+assertions, re-expressed where the new fields require it (for example E2 now expects
+the one `session/created` link listener alongside the one prepended `llm/stream`
+listener). Nothing was deleted or weakened. The tree-specific claims are:
+
+### 7.1 Added and changed claims
+
+| # | Claim | Test | Verdict |
+| --- | --- | --- | --- |
+| A20 | A parent's switch parks a child and a grandchild learned through `observeSession`; an unrelated root's middleware returns the identical `next()` object and dispatches at the peak instant; the parent's view aggregates the whole subtree | `A20 — a parent switch parks its child and grandchild, while an unrelated root returns the identical next()` | verified |
+| A21 | Enabling one root parks only its tree: an unrelated root and its child bypass the gate by identity and dispatch at the peak instant while the enabled tree stays parked | `A21 — enabling a root parks only its tree: an unrelated tree and its child dispatch immediately` | verified |
+| A22 | Nearest explicit choice wins: a child's explicit OFF overrides a parent ON and the grandchild inherits the child; a child explicit ON overrides a parent OFF; a grandchild's `inheritedFrom` moves to the nearest explicit ancestor; an explicit OFF ancestor overrides the configured default ON; `source`/`inheritedFrom` are exact for the self/inherited/default cases | `A22 — the nearest explicit choice wins; view.source and view.inheritedFrom are exact` | verified |
+| A23 | Disabling a parent releases its own holders and every inheriting descendant's, but an explicit-ON child (and its subtree) stays parked, counted and timer-armed; an unrelated session is untouched | `A23 — disabling a parent releases only its inheriting descendants; an explicit-ON child stays parked and counted` | verified |
+| A24 | Subtree counters are exact across a three-session tree: `holding`/`ownHolding`/`since`/`releaseAt`/`heldTotal`/`delayedMs` aggregate `self + tracked descendants`, `otherHolding` excludes the whole subtree, and `revision` moves only with rendered fields (a clock move alone never moves it) | `A24 — a view aggregates its subtree counters and the revision moves only with rendered changes` | verified |
+| A25 | The live synchronous `parentOf` fallback resolves a tree with no announcement; `observeSession` overrides a resolver guess and re-parents a child out of its old subtree; cycles and self-links terminate as roots; the parent-link cache is bounded (an old link is re-resolved, a recent one is not) | `A25 — the live parentOf fallback resolves a tree, observeSession overrides it, cycles end as roots, and the link cache is bounded` | verified |
+| A26 | `apply()` registers exactly one `session/created` listener (and one prepended `llm/stream` listener); a delivered `session/created` event makes the tree resolve through the real gate/route; a hostile or null announcement cannot throw and cannot veto creation | `A26 — apply() registers exactly one session/created listener, and an event makes the tree resolve` | verified |
+| A17b | The version-2 durable file stores explicit per-session choices only — never parent links; a fresh gate on the same store keeps the choice but has no tree until the live links are announced, and announcing writes nothing | `A17b — the durable file stores explicit choices only; a restart rebuilds the tree from live links` | verified |
+| B1–B5 | The wire claims are unchanged: the route is still addressed by one `?session=<id>`, the mutation body is still exactly `{session, enabled}`, the guard order is unchanged, the response satisfies the schemaVersion-4 `validGateView` and carries a per-session ETag | `B1`…`B5`, A18 | verified |
+| E2 | `apply()` registers exactly two listeners: one prepended `llm/stream` interception point and the one `session/created` delegation-link listener; the route and the listener still share one gate | `E2 — apply() registers the llm/stream listener, the one session/created link listener and the /gate route over one per-session gate` | verified |
+| C9 | A real parent switch parks the real `ctx.llm.stream()` calls of its child and grandchild through the real LLM waterfall, while a sibling root conversation reaches the adapter at the peak instant; the whole tree dispatches at the boundary and the sibling does not | `C9 — a real parent switch parks its child and grandchild through the real waterfall, while a sibling root dispatches` | verified |
+| C10 | Disabling a real parent mid-hold releases its inheriting child immediately (inside peak) but leaves an explicitly enabled grandchild parked until the boundary, still counted under the parent's view | `C10 — disabling a parent mid-hold releases its inheriting child at once but not an explicitly enabled grandchild` | verified |
+
+### 7.2 Historical clauses explicitly superseded
+
+| v2.2.0 clause | Superseded by |
+| --- | --- |
+| Success criterion 7: "The scope is exactly one session… a delegated subagent is a session of its own and carries its own switch." | scope is one conversation tree; a subagent inherits its nearest explicit ancestor unless switched by hand; A20–A23, C9 |
+| `GateView` schemaVersion 3; `enabled` is the session's own stored choice; no `source`/`inheritedFrom`/`ownHolding`; counters are that one session's; `otherHolding` = every other session | v4: effective `enabled`, `source`/`inheritedFrom`, `ownHolding`, subtree-scoped counters, `otherHolding` = parked outside this subtree; A20, A24 |
+| Decision rule `stored choice ?? config.gate.enabled` per session | walk self → parent → … (cycle-safe, max depth 64), nearest explicit choice wins, else the configured default; A22, A25 |
+| `setEnabled(S, false)` releases only S's own holders | releases S's own holders and the inheriting descendants'; an explicit-ON descendant (and its subtree) keeps holding; A23, C10 |
+| "enabling session A can never park session B's calls" (siblings only) | unchanged for unrelated conversations, but A's **descendants** now inherit A; A20 vs A21/A23 |
+| The gate has no delegation knowledge; `OffPeakGate` has no `observeSession`, `CreateGateOptions` no `parentOf`; `apply()` registers one listener | live parent links via the one `session/created` listener + synchronous `parentOf` fallback; links bounded, never persisted; A25, A26, E2 |
+| A subagent "inherits `config.gate.enabled` until it is switched itself" | it inherits its nearest explicitly-switched ancestor; only the absence of any explicit choice falls back to `config.gate.enabled`; A20, A22 |
+| `GateStore`/version-2 durable file/`/gate` wire scope | **not superseded**: the durable file still stores explicit per-session choices only (no parent links), the file format and 512-session cap are unchanged, and the wire guard order is unchanged (only the serialized view grows the v4 fields); A14, A17, A18, B1–B5 |
+
+### 7.3 Commands and verdict (this revision)
+
+```
+node --test --test-isolation=none --test-concurrency=1 test/gate.test.ts test/gate-integration.test.ts
+```
+
+```
+ℹ tests 48
+ℹ suites 0
+ℹ pass 48
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 435.558271
+```
+
+```
+pnpm typecheck
+```
+
+```
+$ tsc --noEmit
+(no diagnostics)
+```
+
+No test reads the real clock and no test sleeps in real time; the injected clock is
+hand-drained and the only real timer is the per-assertion `withDeadline` guard whose
+job is to turn a hang into a failure. The tree claims use the same deterministic
+clock/store/pricing doubles as the per-session claims, and A26 drives the real
+`apply()` on a fake `webServer`/`ctx` in the style of the E claims.
+
+### 7.4 Limitations of this addendum
+
+1. The v2.1.0 mutation matrix (§3) was not re-run for v2.3.0; the claim suites are
+   the regression net and the Lead runs the complete `pnpm check` on the final tree
+   (which requires `pnpm build` before the suites that read `dist/`).
+2. The host half's claims A20–A26 / C9–C10 are the evidence recorded in §7.1. An
+   independent claim-first suite for this revision (`test/gate-tree.test.ts`,
+   V12–V19) is produced by the verification task against the frozen contract; its
+   results are reported separately by the verifier and are not restated here.
+3. Delegation links are live-only by design. A process that has not observed a
+   `session/created` (and cannot resolve the link through `ctx.sessions` /
+   `ctx.agents`) treats the session as a root; this is the documented v2.3.0
+   limitation, not a test gap.
+4. The `delayedMs` interpretation from §4.4 is unchanged: it is the summed dispatch
+   delay of delayed requests, now aggregated over the subtree (A24 asserts the sum).
+5. The client half (`src/client/gate.ts`, the panel, locale, styles, transport) is
+   T2/T3's surface; this suite asserts that the host's GET/POST bodies satisfy the
+   shared schemaVersion-4 `validGateView` (B1, B2) and that the tree fields render
+   consistently (A20–A26), not the panel's behaviour.

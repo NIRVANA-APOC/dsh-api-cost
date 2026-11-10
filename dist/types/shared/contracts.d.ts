@@ -117,17 +117,28 @@ export type HolidayOverrides = Readonly<Record<string, {
     readonly makeupWorkdays?: readonly HolidayRange[] | undefined;
 }>>;
 /**
- * Off-peak request gate (`src/host/gate.ts`).
+ * Off-peak request gate (`src/host/gate.ts`), one switch per conversation tree.
  *
- * `off`     the user turned it off; every model request dispatches immediately.
- * `open`    the user turned it on and the tier is off-peak; requests dispatch.
- * `holding` the user turned it on and the tier is peak; model requests are
- *           parked until the tier turns off-peak, so the provider call — and
- *           therefore its settlement — happens entirely inside the cheap window.
+ * `off`     the effective choice is off; this session's model requests dispatch
+ *           immediately.
+ * `open`    the effective choice is on and the tier is off-peak; requests dispatch.
+ * `holding` the effective choice is on and the tier is peak; the requests issued
+ *           by this session are parked until the tier turns off-peak, so the
+ *           provider call — and therefore its settlement — happens entirely
+ *           inside the cheap window.
+ *
+ * The scope is one session **and its delegation subtree**: enabling the switch
+ * in a conversation parks the model requests of that session and of every
+ * subagent session it delegates to (and their descendants). An unrelated
+ * conversation is never affected. The nearest explicit choice wins — a session
+ * whose own switch was flipped keeps that choice, otherwise it follows the
+ * nearest ancestor that was flipped, otherwise the configured default.
  */
 export type GateState = 'off' | 'open' | 'holding';
+/** How a session's effective position was decided. */
+export type GateSource = 'self' | 'inherited' | 'default';
 /**
- * The control surface the capsule panel reads and writes.
+ * The per-session control surface the capsule panel reads and writes.
  *
  * Deliberately shaped so the client can render without a second source of
  * truth: `peak`/`reason`/`next` come from the pricing engine, `state` and the
@@ -135,27 +146,41 @@ export type GateState = 'off' | 'open' | 'holding';
  * milliseconds so a client clock skew cannot change what is displayed.
  */
 export interface GateView {
-    readonly schemaVersion: 2;
-    /** The user's choice; the only field the panel writes. */
+    readonly schemaVersion: 4;
+    /** The one session this view describes; the switch controls this session's subtree. */
+    readonly sessionId: string;
+    /** The effective position for this session (its own choice, an ancestor's, or the default). */
     readonly enabled: boolean;
+    /** Where `enabled` came from. `self` is the only kind the panel can write. */
+    readonly source: GateSource;
+    /**
+     * When `source === 'inherited'`, the nearest ancestor session whose explicit
+     * choice is being followed; otherwise `null`.
+     */
+    readonly inheritedFrom: string | null;
     readonly state: GateState;
     /** The tier in force at `now`, from the same engine that prices settlements. */
     readonly peak: boolean;
     /** The engine's own reason for that tier (peak-window, weekend, holiday, …). */
     readonly reason: string;
-    /** Instant the current hold releases; null while nothing is held. */
+    /** Instant the oldest request in this subtree releases; null while nothing is held. */
     readonly releaseAt: number | null;
-    /** Model requests currently parked. */
+    /** Requests parked in this session's subtree right now (own + descendants). */
     readonly holding: number;
-    /** Instant the oldest parked request started waiting; null while none is. */
+    /** This session's own parked requests; `<= holding`. */
+    readonly ownHolding: number;
+    /** Instant the oldest parked request in this subtree started waiting; null while none is. */
     readonly since: number | null;
-    /** Requests parked since this process started. */
+    /** Requests parked in this subtree since this process started. */
     readonly heldTotal: number;
-    /** Total milliseconds of dispatch delay applied since this process started. */
+    /** Dispatch delay this subtree has absorbed since this process started. */
     readonly delayedMs: number;
-    /** Instant the enabled flag last changed. */
-    readonly changedAt: number;
-    /** True when the enabled flag survives a restart of this process. */
+    /**
+     * Instant this session's own switch last changed by hand. `null` while this
+     * session has no explicit choice of its own (it inherits or follows the default).
+     */
+    readonly changedAt: number | null;
+    /** True when this session's own choice is durable across a restart. */
     readonly durable: boolean;
     /** Changes only when this value changes; safe as an ETag component. */
     readonly revision: string;
@@ -166,20 +191,30 @@ export interface GateView {
     } | null;
     /** Instant this view was produced. */
     readonly now: number;
+    /**
+     * Requests parked outside this session's subtree right now. `holding` covers
+     * this conversation tree; this field exists so the panel can say an unrelated
+     * conversation is also waiting without implying this switch caused it.
+     */
+    readonly otherHolding: number;
 }
 /** Off-peak gate configuration. Omit `gate` to keep the feature available but off. */
 export interface GateConfig {
-    /** Initial enabled state, used only when nothing durable has been stored. Default false. */
+    /**
+     * The default position for a conversation tree in which no session has been
+     * switched by hand. An explicit switch on a session governs that session's
+     * subtree until a descendant is switched by hand. Default false.
+     */
     readonly enabled?: boolean | undefined;
-    /** Persist the enabled state across restarts. Default true. */
+    /** Persist per-session positions across restarts. Default true. */
     readonly persist?: boolean | undefined;
     /** Explicit state-file path; defaults to `<dsh home>/state/dsh-api-cost/gate.json`. */
     readonly path?: string | undefined;
     /**
      * Which model calls the gate holds. `all` (the default) holds every model
-     * request. `priced` holds only ids the published DeepSeek card prices, so a
-     * subscription-backed or third-party route — where no peak/off-peak rate
-     * exists to save — is never delayed for nothing.
+     * request of a gated session. `priced` holds only ids the published DeepSeek
+     * card prices, so a subscription-backed or third-party route — where no
+     * peak/off-peak rate exists to save — is never delayed for nothing.
      */
     readonly models?: 'all' | 'priced' | undefined;
 }

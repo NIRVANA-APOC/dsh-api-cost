@@ -19,9 +19,11 @@ export function publicError(error: unknown): { status: number; body: ApiError } 
   return { status: 503, body: { ok: false, code: 'SESSION_UNAVAILABLE', message: 'Cost estimate is currently unavailable.' } }
 }
 
-/** The whole body a gate mutation may carry: `{"enabled":true}`. */
+/** The whole body a gate mutation may carry: `{"session":"<id>","enabled":true}`. */
 const GATE_BODY_LIMIT = 4096
-const INVALID_BODY_MESSAGE = 'The gate body must be a JSON object with exactly one boolean enabled key.'
+const INVALID_BODY_MESSAGE = 'The gate body must be a JSON object with exactly two keys: a session string and a boolean enabled.'
+/** The one query key the gate read accepts. The switch belongs to exactly one session. */
+const GATE_QUERY_KEYS: ReadonlySet<string> = new Set(['session'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -48,16 +50,18 @@ function foreignOrigin(req: IncomingMessage): boolean {
   const host = req.headers.host
   return host === undefined || (origin !== 'http://' + host && origin !== 'https://' + host)
 }
-/** `{"enabled": <boolean>}` and nothing else; malformed input is a 400, never a coercion. */
-function parseGateBody(body: Buffer): boolean {
+/** `{"session": <id>, "enabled": <boolean>}` and nothing else; malformed input is a 400, never a coercion. */
+function parseGateBody(body: Buffer): { readonly sessionId: string; readonly enabled: boolean } {
   let parsed: unknown
   try { parsed = JSON.parse(body.toString('utf8')) } catch { throw invalidBody() }
   if (!isRecord(parsed)) throw invalidBody()
   const keys = Object.keys(parsed)
-  if (keys.length !== 1 || keys[0] !== 'enabled') throw invalidBody()
+  if (keys.length !== 2 || !keys.includes('session') || !keys.includes('enabled')) throw invalidBody()
+  const session: unknown = parsed['session']
   const enabled: unknown = parsed['enabled']
-  if (typeof enabled !== 'boolean') throw invalidBody()
-  return enabled
+  if (typeof session !== 'string' || typeof enabled !== 'boolean') throw invalidBody()
+  // The one shared session-id rule across every cost surface; a bad id is its own 400.
+  return { sessionId: validateSessionId(session), enabled }
 }
 function toBytes(chunk: unknown): Buffer | undefined {
   if (typeof chunk === 'string') return Buffer.from(chunk, 'utf8')
@@ -118,11 +122,16 @@ export function registerHttp(ctx: Context, queries: CostQueries, engine: Pricing
     if (req.headers['sec-fetch-site'] === 'cross-site') { sendJson(res, 403, { ok: false, code: 'CROSS_SITE', message: 'Cross-site cost queries are not allowed.' }); return }
     await handler(new URL(req.url ?? '/', 'http://127.0.0.1'), req, res, signal)
   })
-  /** The gate surface: one read, one mutation. Unlike `guarded` it owns both methods on one path. */
+  /** The gate surface: one per-session read, one per-session mutation. Unlike `guarded` it owns both methods on one path. */
   const gateRoute = budgeted(async (req, res) => {
     if (req.method === 'GET') {
       if (crossSite(req)) throw new QueryError('CROSS_SITE', 403, 'Cross-site gate requests are not allowed.')
-      const view = gate.view()
+      let url: URL
+      try { url = new URL(req.url ?? '/', 'http://127.0.0.1') } catch { throw new QueryError('INVALID_PARAMETER', 400, 'The gate read URL is malformed.') }
+      // A gate read is about one session: it takes exactly one `session` query key.
+      for (const key of url.searchParams.keys()) if (!GATE_QUERY_KEYS.has(key)) throw new QueryError('INVALID_PARAMETER', 400, 'Unsupported query parameter; a gate read accepts only one session.')
+      if (url.searchParams.getAll('session').length > 1) throw new QueryError('INVALID_PARAMETER', 400, 'The session query parameter must appear exactly once.')
+      const view = gate.view(validateSessionId(url.searchParams.get('session') ?? ''))
       const etag = '"' + view.revision + '"'
       if (req.headers['if-none-match'] === etag) { res.writeHead(304, { etag, 'cache-control': 'private, no-cache' }); res.end(); return }
       sendJson(res, 200, view, etag)
@@ -135,7 +144,9 @@ export function registerHttp(ctx: Context, queries: CostQueries, engine: Pricing
     if (foreignOrigin(req)) throw new QueryError('CROSS_SITE', 403, 'Cross-site gate changes are not allowed.')
     const body = await readBoundedBody(req, GATE_BODY_LIMIT)
     if (body === undefined) throw invalidBody()
-    sendJson(res, 200, await gate.setEnabled(parseGateBody(body)))
+    const request = parseGateBody(body)
+    // The answer is the host's view of THAT session; no other session moves.
+    sendJson(res, 200, await gate.setEnabled(request.sessionId, request.enabled))
   })
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: API_PREFIX + '/view', handler: guarded(async (url, req, res, signal) => {
     for (const key of url.searchParams.keys()) if (!['session', 'scope', 'detail', 'force'].includes(key)) throw new QueryError('INVALID_PARAMETER', 400, 'Unsupported query parameter.')
