@@ -188,4 +188,7 @@ jobs:
         run: |
           set -euo pipefail
           npm config delete '//registry.npmjs.org/:_authToken' || true
-          npm publish --dry-run --access public
+          # `--force` only drops the "this version already exists on the registry"
+          # guard: a rehearsal runs against main, which usually carries the version
+          # that was just released. `--dry-run` still guarantees nothing is uploaded.
+          npm publish --dry-run --force --access public

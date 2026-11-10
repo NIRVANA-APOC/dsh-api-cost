@@ -87,7 +87,7 @@ secret. The secret is never read in an `if:` directly (Actions does not allow th
 | --- | --- | --- | --- |
 | `NPM_TOKEN` secret set | *Publish with NPM_TOKEN* | `npm publish --provenance --access public` (token in `NODE_AUTH_TOKEN`) | Produced by the explicit `--provenance` flag (the workflow has `id-token: write`). |
 | `NPM_TOKEN` secret absent | *Publish with OIDC trusted publishing* | `npm publish --access public`, relying on the npm OIDC trusted publisher configured on npmjs.com | npm generates it automatically for trusted publishing. |
-| `workflow_dispatch` with `dry-run: true` (the default) | *Dry run (rehearsal)* | `npm publish --dry-run --access public` | — nothing is uploaded. |
+| `workflow_dispatch` with `dry-run: true` (the default) | *Dry run (rehearsal)* | `npm publish --dry-run --force --access public` | — nothing is uploaded. |
 
 The token path exists for packages that do not exist on the registry yet (and as a
 fallback). `dsh-api-cost` exists on npm, and its trusted publisher is configured and
@@ -105,10 +105,12 @@ release decision, not a default.
 
 `workflow_dispatch` takes one boolean input, `dry-run`, defaulting to `true`. With
 the default, everything above runs and the last step calls
-`npm publish --dry-run --access public` instead of publishing: npm prints the exact
-file list, size, shasum and integrity that a real publish would use, and nothing is
-uploaded. It needs no credentials. Unchecking `dry-run` on a manual dispatch performs
-a real publish (§6).
+`npm publish --dry-run --force --access public` instead of publishing: npm prints the
+exact file list, size, shasum and integrity that a real publish would use, and nothing
+is uploaded. It needs no credentials. `--force` is there because a dry run still checks
+the registry first, and `main` usually carries the version that was just released; it
+only drops that duplicate-version guard, it does not bypass `--dry-run`. Unchecking
+`dry-run` on a manual dispatch performs a real publish (§6).
 
 Because `setup-node` with `registry-url` writes
 `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into the runner `.npmrc`, the
@@ -242,12 +244,13 @@ process — no release, tag or secret required, and no network publish.
    exist on the default branch).
 2. Actions → **npm-publish** → *Run workflow* → branch `main` → leave the
    `dry-run` checkbox **checked** (the default) → *Run workflow*.
-3. Expect: install, typecheck, test, bench, the `dist` assertion, `pnpm pack`, the
-   `npm-pack` artifact, and a green *Dry run (rehearsal)* step whose log contains
-   `Publishing to https://registry.npmjs.org/ ... (dry-run)` and a file list. No
-   *Publish* step runs. A `warn publish This command requires you to be logged in`
-   line is expected in the dry-run step: the rehearsal deliberately has no
-   credential and uploads nothing.
+3. Expect: install, typecheck, test, bench, the `dist` assertion, the preflight version
+   check, `pnpm pack`, the `npm-pack` artifact, and a green *Dry run (rehearsal)* step
+   whose log contains `Publishing to https://registry.npmjs.org/ ... (dry-run)` and a
+   file list. No *Publish* step runs. The rehearsal uses `--dry-run --force`: the
+   release version already exists on the registry, so without `--force` npm would
+   reject even the rehearsal. A `warn publish This command requires you to be logged in`
+   line is expected: the rehearsal deliberately has no credential and uploads nothing.
 4. The rehearsal is the place to catch a broken gate, a stale `dist` or a wrong
    version check — before a tag exists and before anything is uploaded. Real publishes
    are append-only; never republish a version that already exists.
