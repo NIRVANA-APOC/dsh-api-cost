@@ -98,6 +98,22 @@ jobs:
           fi
           echo "release tag '$RELEASE_TAG' matches package.json version '$version'"
 
+      - name: Check whether this version is already live on npm
+        id: live
+        env:
+          # Empty rather than unset: see the note on the verification step.
+          NODE_AUTH_TOKEN: ''
+        run: |
+          set -euo pipefail
+          version="$(node --print 'require("./package.json").version')"
+          current="$(npm view "dsh-api-cost@$version" version --prefer-online 2>/dev/null || true)"
+          if [ "$current" = "$version" ]; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "dsh-api-cost@$version is already live; the publish steps will be skipped."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Pack the tarball
         run: |
           set -euo pipefail
@@ -113,13 +129,13 @@ jobs:
           retention-days: 14
 
       - name: Publish with NPM_TOKEN
-        if: env.HAS_NPM_TOKEN == 'true' && (github.event_name != 'workflow_dispatch' || inputs['dry-run'] == false)
+        if: env.HAS_NPM_TOKEN == 'true' && steps.live.outputs.already_published != 'true' && (github.event_name != 'workflow_dispatch' || inputs['dry-run'] == false)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --provenance --access public
 
       - name: Publish with OIDC trusted publishing
-        if: env.HAS_NPM_TOKEN != 'true' && (github.event_name != 'workflow_dispatch' || inputs['dry-run'] == false)
+        if: env.HAS_NPM_TOKEN != 'true' && steps.live.outputs.already_published != 'true' && (github.event_name != 'workflow_dispatch' || inputs['dry-run'] == false)
         env:
           # Present but empty: keeps setup-node's `${NODE_AUTH_TOKEN}` interpolation
           # happy while leaving the token unset, so the CLI falls through to OIDC.
@@ -143,18 +159,22 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node --print 'require("./package.json").version')"
-          for attempt in $(seq 1 12); do
-            live="$(npm view "dsh-api-cost@$version" version 2>/dev/null || true)"
+          # npm can answer "Your package is being processed and may take a few
+          # minutes to become available." when the publish is accepted; keep
+          # polling for up to five minutes instead of treating that as a failure.
+          for attempt in $(seq 1 60); do
+            live="$(npm view "dsh-api-cost@$version" version --prefer-online 2>/dev/null || true)"
             if [ "$live" = "$version" ]; then
               echo "dsh-api-cost@$version is live on the registry"
               exit 0
             fi
-            echo "attempt $attempt/12: dsh-api-cost@$version not live yet; retrying in 5s"
+            echo "attempt $attempt/60: dsh-api-cost@$version not readable yet; retrying in 5s"
             sleep 5
           done
-          echo "::error::npm publish reported success but dsh-api-cost@$version is not live after 60s."
-          echo "A brand-new package's first publish can be staged by the registry."
-          echo "Approve it on npmjs.com -> Staged Packages (2FA) or run 'npm stage approve <stage-id>' (npm >= 11.15), then re-run this job."
+          echo "::error::npm publish reported success but dsh-api-cost@$version is not readable after 5 minutes."
+          echo "A brand-new package's first publish can be staged by the registry; if so,"
+          echo "approve it on npmjs.com -> Staged Packages (2FA) or via 'npm stage approve <stage-id>' (npm >= 11.15)."
+          echo "The job is safe to re-run: the preflight check skips publishing when the version is already live."
           exit 1
 
       - name: Dry run (rehearsal)

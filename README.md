@@ -44,7 +44,7 @@ dsh plugin --profile web add github:NIRVANA-APOC/dsh-api-cost
 dsh plugin --profile desktop add github:NIRVANA-APOC/dsh-api-cost
 ```
 
-桌面版请在执行安装命令前**完全退出** DSH（Windows 上从托盘退出；只关窗口会留下进程锁），安装后重新打开；如果桌面版还没有 `dsh` 命令，先在它的菜单里用 **Manage dsh Command → Install** 注册一次。Web 版也可以直接用 `npx @deepseek-ai/dsh plugin --profile web add github:NIRVANA-APOC/dsh-api-cost`。GitHub 源安装要求本机有可用的 `git`（pnpm 通过 git 拉取仓库）；npm 上的正式版（2.3.0）发布后，`dsh plugin --profile web add dsh-api-cost` 等价且不再需要 git（npm 渠道由仓库的 release 工作流发布，见 [docs/releasing.md](docs/releasing.md)）。宿主侧能力（投影、`/cost`、`session_cost`、HTTP 读取）立即生效，输入框那枚胶囊要等启动时合成客户端包，所以**重启 DSH 一次**。
+桌面版请在执行安装命令前**完全退出** DSH（Windows 上从托盘退出；只关窗口会留下进程锁），安装后重新打开；如果桌面版还没有 `dsh` 命令，先在它的菜单里用 **Manage dsh Command → Install** 注册一次。Web 版也可以直接用 `npx @deepseek-ai/dsh plugin --profile web add github:NIRVANA-APOC/dsh-api-cost`。GitHub 源安装要求本机有可用的 `git`（pnpm 通过 git 拉取仓库）；npm 上的 2.3.0 已发布，也可用 `dsh plugin --profile web add dsh-api-cost`（同一个包，不需要 git；npm 渠道由仓库的 release 工作流带 provenance 发布，见 [docs/releasing.md](docs/releasing.md)）。宿主侧能力（投影、`/cost`、`session_cost`、HTTP 读取）立即生效，输入框那枚胶囊要等启动时合成客户端包，所以**重启 DSH 一次**。
 
 ## 界面
 
