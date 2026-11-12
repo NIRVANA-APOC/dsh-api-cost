@@ -12,10 +12,21 @@ function sendJson(res: ServerResponse, status: number, body: unknown, etag?: str
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-cache', 'content-length': Buffer.byteLength(text), 'x-content-type-options': 'nosniff', ...(etag === undefined ? {} : { etag }) })
   res.end(text)
 }
+/** The public code of a framework error, without trusting its shape. */
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined
+  return typeof error.code === 'string' ? error.code : undefined
+}
 export function publicError(error: unknown): { status: number; body: ApiError } {
   if (error instanceof QueryError) return { status: error.status, body: { ok: false, code: error.code, message: error.message } }
   if (error instanceof DOMException && error.name === 'AbortError') return { status: 503, body: { ok: false, code: 'QUERY_CANCELLED', message: 'Cost query cancelled or timed out.' } }
-  if (typeof error === 'object' && error !== null && 'code' in error && (error.code === 'SESSION_QUERY_NOT_FOUND' || error.code === 'SESSION_QUERY_SESSION_NOT_FOUND' || error.code === 'session/not-found')) return { status: 404, body: { ok: false, code: 'SESSION_NOT_FOUND', message: 'Session not found.' } }
+  const code = errorCode(error)
+  // A caller's abort and the engine's own abort are the same public event.
+  if (code === 'SESSION_QUERY_ABORTED') return { status: 503, body: { ok: false, code: 'QUERY_CANCELLED', message: 'Cost query cancelled or timed out.' } }
+  if (code === 'SESSION_QUERY_NOT_FOUND' || code === 'SESSION_QUERY_SESSION_NOT_FOUND' || code === 'session/not-found') return { status: 404, body: { ok: false, code: 'SESSION_NOT_FOUND', message: 'Session not found.' } }
+  // A session the engine cannot replay is a data problem, not a transient
+  // outage; saying so keeps an unreadable log distinct from a timed-out read.
+  if (code === 'SESSION_QUERY_CORRUPT_SESSION') return { status: 422, body: { ok: false, code: 'SESSION_UNREADABLE', message: 'The stored session could not be read.' } }
   return { status: 503, body: { ok: false, code: 'SESSION_UNAVAILABLE', message: 'Cost estimate is currently unavailable.' } }
 }
 

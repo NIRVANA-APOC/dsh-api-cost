@@ -1,5 +1,4 @@
 import type { SessionHeader } from '@deepseek-ai/dsh-session';
-import type { TeamProjection } from '@deepseek-ai/dsh-experimental-agent-team';
 import type { SubagentCatalogEntry } from '@deepseek-ai/dsh-subagent';
 import type { CostView, LedgerView, Scope } from '../shared/contracts.js';
 export declare class QueryError extends Error {
@@ -7,11 +6,29 @@ export declare class QueryError extends Error {
     readonly status: number;
     constructor(code: string, status: number, message: string);
 }
+/** One durable roster row of the 0.2.0 experimental Agent Team projection. */
+export interface TeamMemberRow {
+    readonly id: string;
+    readonly name: string;
+    readonly role: 'lead' | 'teammate';
+    readonly phase?: string | undefined;
+}
+/**
+ * The `agentTeam` projection in either shape DSH has published. 0.2.0 published
+ * a durable `members` roster; 0.2.2 publishes only the saved Team selection and
+ * task board (`enabled`, `tasks`) and derives the roster from the subagent
+ * catalog. This host reads `members` when it is there and never assumes it.
+ */
+export interface TeamProjectionLike {
+    readonly failure?: string | undefined;
+    readonly members?: readonly TeamMemberRow[] | undefined;
+    readonly enabled?: boolean | undefined;
+}
 export interface CostCut {
     readonly header: Pick<SessionHeader, 'id' | 'parentSession' | 'origin'>;
     readonly ledger: LedgerView;
     readonly catalog: readonly SubagentCatalogEntry[] | undefined;
-    readonly team: TeamProjection | undefined;
+    readonly team: TeamProjectionLike | undefined;
 }
 export interface QuerySource {
     /** The adapter owns and releases each native observation before returning. */

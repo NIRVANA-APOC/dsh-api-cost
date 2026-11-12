@@ -23,7 +23,7 @@ const baseline = JSON.parse(read('docs/baseline.json')) as { artifacts: Record<s
  * bilingual copy and the wire validator), moving the cap to 12 KiB at 11.3 KiB.
  * 2.2 made that gate per-session and rebuilt the panel around a tariff ledger;
  * 2.3 makes the gate govern a conversation tree (parent-link resolution, subtree
- * aggregation, inheritance states in the panel) at ~13.7 KiB client / ~15.0 KiB
+ * aggregation, inheritance states in the panel) at ~13.7 KiB client / ~15.3 KiB
  * host, so the caps are 15 KiB and 16 KiB. They stay real budgets: the measured
  * figures are asserted against hard numbers, not against themselves, and the
  * aggregate legacy comparison below still holds.
@@ -32,7 +32,7 @@ const CLIENT_BUDGET = 15360
 const HOST_BUDGET = 16384
 
 test('the manifest points at files that exist and ships them', () => {
-  assert.equal(manifest.version, '2.3.0')
+  assert.equal(manifest.version, '2.3.1')
   assert.equal(manifest.dsh.client.platform, 'web')
   assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(manifest.exports['./client'] !== undefined, true)

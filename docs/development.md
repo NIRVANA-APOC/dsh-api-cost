@@ -12,7 +12,7 @@ toolchain is a development-only requirement.
 - pnpm. CI uses Node 24 with pnpm 11.7.0 and installs with
   `pnpm install --frozen-lockfile --ignore-scripts`.
 - No running DSH host is needed for the Node-native `pnpm test` suite. To exercise
-  the plugin inside DSH, the host must be DeepSeek Harness **0.2.0-rc.2** with the
+  the plugin inside DSH, the host must be DeepSeek Harness **0.2.0-rc.2 or newer** (verified on **0.2.2-rc.2**) with the
   `sessionProjections`, `sessionProjectionCache` and `sessionQuery` capabilities
   mounted (the shipped `web` and `desktop` profiles have them).
 
@@ -51,7 +51,7 @@ Measured on Node 24.21 against the recorded 1.0.0 baseline and the same fixtures
 100k settlements price in **11 ms** (was 22.7 ms), a 71-session historical tree
 aggregates completely in **1.4 ms** cold and **0.05 ms** warm, and per-session
 projection state stays under **6 KiB** after 100k settlements. The shipped bundles
-in 2.3 are **13.7 KiB** (client) and **15.0 KiB** (host) gzip: the growth over the
+in 2.3 are **13.7 KiB** (client) and **15.3 KiB** (host) gzip: the growth over the
 pre-gate 9.6 / 10.3 KiB is the gate (a session-keyed client store, the durable
 choices, the parent-link resolution and the wire) plus the tariff-ledger panel
 redesign (one panel clock, the tariff band, the gate block and the larger bilingual

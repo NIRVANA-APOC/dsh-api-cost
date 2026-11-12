@@ -25,14 +25,14 @@
 - **Avoid peak** — while the switch is on and the tier is peak, the model requests of this session and the child sessions it delegates to are parked and then sent unchanged once off-peak begins: up to half the price, with the model none the wiser.
 - **Correct settlement semantics** — projection-first: one settlement per `assistant/message`, priced at its own settlement instant; a forked child's own figure excludes the inherited prefix; a resumed history folds from the durable log rather than starting at ¥0 or double counting.
 - **Clear attribution** — `self` / `tree` / `team` scopes; the team roster lists one money figure per member with the Lead marked ★; `others` is always `total − own`, so a fork is never counted twice.
-- **Light** — no replay framework, no database, no polling loop of its own: about **13.7 KiB gzip** on the client and **15.0 KiB gzip** on the host.
+- **Light** — no replay framework, no database, no polling loop of its own: about **13.7 KiB gzip** on the client and **15.3 KiB gzip** on the host.
 - **Honest** — an estimate, not a bill; models outside the rate card are marked unpriced instead of guessed; coverage gaps are written out in words.
 
 **Why it is not another usage panel.** Usage panels typically replay logs plugin-side and keep a ledger of their own. `dsh-api-cost` registers a host-owned `apiCost` session projection — event drive, per-session watermark and durable checkpoint all belong to the Harness — and the client reads the same projection through the framework's own `useProjection` seat. The difference is structural: history never has to be backfilled and a restart cannot double the figure; `tree` / `team` attribution reuses the durable delegation catalog and team roster, the fork-inherited prefix is explicitly excluded, and looking at a branch never counts its ancestors twice.
 
 ## Install
 
-Requires DeepSeek Harness **0.2.0-rc.2+** with the `sessionProjections`, `sessionProjectionCache` and `sessionQuery` capabilities mounted (the shipped `web` and `desktop` profiles have them). The repository ships a prebuilt `dist/` — **installation never runs a compiler**; Node.js 24 is needed only for development.
+Requires DeepSeek Harness **0.2.0-rc.2+** (verified on **0.2.2-rc.2**) with the `sessionProjections`, `sessionProjectionCache` and `sessionQuery` capabilities mounted (the shipped `web` and `desktop` profiles have them). The repository ships a prebuilt `dist/` — **installation never runs a compiler**; Node.js 24 is needed only for development.
 
 ```sh
 # Web / CLI profile — install from the GitHub repository (works today)

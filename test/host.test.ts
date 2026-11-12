@@ -105,6 +105,10 @@ function headerEvent(seq: number, time: number, model: unknown): FakeEvent {
 function catalogEvent(seq: number, childId: string): FakeEvent {
   return { type: 'subagent/catalog', seq, time: PEAK, data: { version: 1, childId, childCreatedAt: PEAK, mode: 'one-shot' } }
 }
+/** The DSH 0.2.2 Team selection: a Team is a subagent tree only while this is on. */
+function teamModeEvent(seq: number, enabled: boolean): FakeEvent {
+  return { type: 'team/mode', seq, time: PEAK, data: { enabled } }
+}
 /** The whole-value teammate lifecycle record stored in the Team Lead's log. */
 function teamMemberEvent(seq: number, id: string, name: string, phase = 'active'): FakeEvent {
   return {
@@ -218,6 +222,9 @@ function createRegistry(sessions: Map<string, FakeSession>) {
   }
 }
 
+/** Which Agent Team generation the fake composition exposes. */
+type TeamGeneration = 'legacy' | 'subagent-tree'
+
 /**
  * Stand-ins for the two DSH units whose values the host reads next to its own
  * (`subagentCatalog` from `@deepseek-ai/dsh-subagent`, `agentTeam` from
@@ -225,8 +232,13 @@ function createRegistry(sessions: Map<string, FakeSession>) {
  * event payloads and apply the same fork-inheritance and Lead-row rules the
  * shipped units document, so the host's read path is exercised against real
  * projection semantics instead of a stubbed value map.
+ *
+ * `team` selects the Agent Team generation under test: `legacy` is the 0.2.0
+ * experimental service with a durable roster, `subagent-tree` is the 0.2.2
+ * service that publishes no roster and resolves roots through the subagent
+ * tree. Both are shipped DSH shapes; the host must serve both.
  */
-function installStandInUnits(registry: ReturnType<typeof createRegistry>): void {
+function installStandInUnits(registry: ReturnType<typeof createRegistry>, team: TeamGeneration = 'legacy'): void {
   const teamViews = new WeakMap<object, unknown>()
   registry.register({
     key: 'subagentCatalog', stateVersion: 3,
@@ -241,6 +253,22 @@ function installStandInUnits(registry: ReturnType<typeof createRegistry>): void 
     },
     wire: { viewSchema: { parse: (value: unknown) => value }, view: (state: any) => state.entries },
   })
+  if (team === 'subagent-tree') {
+    registry.register({
+      key: 'agentTeam', stateVersion: 7,
+      stateSchema: { parse: (value: unknown) => value },
+      init: (_header: any) => ({ enabled: undefined as boolean | undefined, tasks: [] as unknown[] }),
+      apply(state: any, event: any) {
+        if (event?.type !== 'team/mode' || typeof event.data?.enabled !== 'boolean') return state
+        return { ...state, enabled: event.data.enabled }
+      },
+      wire: {
+        viewSchema: { parse: (value: unknown) => value },
+        view: (state: any) => ({ enabled: state.enabled === true, tasks: state.tasks }),
+      },
+    })
+    return
+  }
   registry.register({
     key: 'agentTeam', stateVersion: 4,
     stateSchema: { parse: (value: unknown) => value },
@@ -315,6 +343,8 @@ interface HarnessOptions {
   config?: PluginConfig
   /** Service names to leave out of the composition, for degradation tests. */
   without?: readonly string[]
+  /** Agent Team generation to compose; defaults to the 0.2.0 experimental roster. */
+  team?: TeamGeneration
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -328,8 +358,11 @@ function harness(options: HarnessOptions = {}) {
   const commands: any[] = []
   const agents = new Map<string, { id: string }>()
   const memberships = new Map<string, unknown>()
+  const subagentRoots = new Map<string, string>()
+  let rootLookupFails = false
   const registry = createRegistry(sessions)
-  installStandInUnits(registry)
+  const team: TeamGeneration = options.team ?? 'legacy'
+  installStandInUnits(registry, team)
   let held: Promise<void> | undefined
   let releaseHeld: (() => void) | undefined
 
@@ -376,7 +409,10 @@ function harness(options: HarnessOptions = {}) {
     sessionProjectionCache: { note: 'fake: the host only asserts the capability is mounted' },
     sessionQuery: query,
     agents: { get: (id: string) => agents.get(id) },
-    agentTeams: { tryMembership: (agent: { id: string } | undefined) => (agent === undefined ? undefined : memberships.get(agent.id)) },
+    // 0.2.2's TeamService has no `tryMembership`; a fake that keeps exposing it
+    // would hide exactly the regression these tests must catch.
+    agentTeams: team === 'subagent-tree' ? { isEnabled: () => false } : { tryMembership: (agent: { id: string } | undefined) => (agent === undefined ? undefined : memberships.get(agent.id)) },
+    ...(team === 'subagent-tree' ? { subagents: { rootOf: (agent: { id: string }) => { if (rootLookupFails) throw new Error('root lookup exploded'); return agents.get(subagentRoots.get(agent.id) ?? agent.id) ?? agent } } } : {}),
     tools: { register: (definition: unknown) => { tools.push(definition); return () => {} } },
     commands: { register: (definition: unknown) => { commands.push(definition); return () => {} } },
   }
@@ -405,7 +441,7 @@ function harness(options: HarnessOptions = {}) {
   }
 
   const h = {
-    ctx, routes, tools, commands, registry, observeCalls, disposedObservations, effectDisposers, sessions, agents, memberships,
+    ctx, routes, tools, commands, registry, observeCalls, disposedObservations, effectDisposers, sessions, agents, memberships, subagentRoots,
     addSession(id: string, sessionOptions: { parentSession?: string, origin?: 'subagent', inheritedEventCount?: number, events?: FakeEvent[] } = {}): FakeSession {
       const header: FakeHeader = { version: 4, id, createdAt: 0, isSeeded: (sessionOptions.inheritedEventCount ?? 0) > 0 }
       if (sessionOptions.parentSession !== undefined) header.parentSession = sessionOptions.parentSession
@@ -435,6 +471,8 @@ function harness(options: HarnessOptions = {}) {
     },
     /** Make one session id fail the way a broken persistence backend would. */
     setReadError(sessionId: string, error: unknown): void { readErrors.set(sessionId, error) },
+    /** Make the live subagent-root lookup throw, like a broken service would. */
+    failRootLookup(): void { rootLookupFails = true },
     /** Dispose every effect the plugin registered, newest first, like a fiber unload. */
     dispose(): void {
       for (let index = effectDisposers.length - 1; index >= 0; index -= 1) (effectDisposers[index] as () => void)()
@@ -863,6 +901,124 @@ test('scope=team refuses an unverified Team instead of pretending to succeed', a
   assert.equal(fallback.status, 200)
   assert.equal(fallback.body.scope, 'tree', 'without a Team the automatic scope stays a subtree')
   assert.equal(fallback.body.total.attempts, 2)
+})
+
+/**
+ * The DSH 0.2.2 Team generation: `dsh-base` mounts `@deepseek-ai/dsh-agent-team`,
+ * whose `agentTeam` projection has no roster and whose service has no
+ * `tryMembership`. The composition is identified by live agents plus a
+ * `subagents.rootOf` lookup — exactly what a running GUI session has.
+ */
+function subagentTreeHarness(): Harness {
+  const h = harness({ team: 'subagent-tree' })
+  h.addSession('tree-lead', { events: [messageEvent(0, PEAK, 'deepseek-flash', REAL_USAGE)] })
+  h.addSession('tree-mate-a', { parentSession: 'tree-lead', origin: 'subagent', events: [messageEvent(0, PEAK, 'deepseek-flash', REAL_USAGE), messageEvent(1, PEAK, 'deepseek-flash', REAL_USAGE)] })
+  h.addSession('tree-mate-b', { parentSession: 'tree-lead', origin: 'subagent', events: [messageEvent(0, PEAK, 'deepseek-flash', REAL_USAGE)] })
+  h.addSession('tree-mate-b-child', { parentSession: 'tree-mate-b', origin: 'subagent', events: [messageEvent(0, PEAK, 'deepseek-flash', REAL_USAGE)] })
+  // A live child whose header carries no parent link: only the live root lookup
+  // knows the tree. This is what `subagents.rootOf` exists to answer on 0.2.2.
+  h.addSession('tree-orphan-mate', { origin: 'subagent', events: [messageEvent(0, PEAK, 'deepseek-flash', REAL_USAGE)] })
+  h.append('tree-lead', catalogEvent(1, 'tree-mate-a'))
+  h.append('tree-lead', catalogEvent(2, 'tree-mate-b'))
+  h.append('tree-lead', catalogEvent(3, 'tree-orphan-mate'))
+  h.append('tree-lead', teamModeEvent(4, true))
+  h.append('tree-mate-b', catalogEvent(1, 'tree-mate-b-child'))
+  for (const id of ['tree-lead', 'tree-mate-a', 'tree-mate-b', 'tree-mate-b-child', 'tree-orphan-mate']) h.agents.set(id, { id })
+  for (const id of ['tree-mate-a', 'tree-mate-b', 'tree-mate-b-child', 'tree-orphan-mate']) h.subagentRoots.set(id, 'tree-lead')
+  return h
+}
+
+test('a DSH 0.2.2 subagent-tree Team resolves for a live session instead of answering 503', async () => {
+  const h = subagentTreeHarness()
+  // The panel always reads `auto`; a live agent used to hit the removed
+  // `agentTeams.tryMembership` here and surface as HTTP 503 SESSION_UNAVAILABLE.
+  const live = await request(h, VIEW, 'session=tree-mate-a&detail=full')
+  assert.equal(live.status, 200, 'a live session must not fail because the 0.2.0 roster API is gone')
+  assertValidView(live.body, 'the 0.2.2 Team view')
+  assert.equal(live.body.scope, 'team')
+  assert.equal(live.body.rootSessionId, 'tree-lead')
+  assert.equal(live.body.coverage.status, 'complete', 'the new projection shape must not be reported as a scope gap')
+  assert.equal(live.body.coverage.issues.length, 0)
+  assert.equal(live.body.sessionCount, 5, 'lead, three teammates and the delegated child')
+  assert.equal(live.body.total.attempts, 6)
+  assertSplitIsExact(live.body, '0.2.2 Team scope')
+
+  assert.equal(live.body.members.length, 4, 'the roster is the root plus its cataloged direct children')
+  const lead = live.body.members.find((member: any) => member.sessionId === 'tree-lead')
+  const mateA = live.body.members.find((member: any) => member.sessionId === 'tree-mate-a')
+  const mateB = live.body.members.find((member: any) => member.sessionId === 'tree-mate-b')
+  assert.equal(lead.role, 'lead')
+  assert.equal(mateA.role, 'teammate')
+  assert.equal(mateA.name, 'tree-mate-a', 'a catalog entry without a label falls back to its session id')
+  assert.equal(mateB.money.cny, '0.00737968', 'a grandchild rolls up into its direct ancestor, never the Lead')
+  assert.equal(mateB.ownMoney.cny, PEAK_CNY)
+  const attributed = live.body.members.reduce((sum: bigint, member: any) => sum + decimalToNano(member.money.cny), 0n)
+  assert.equal(attributed, decimalToNano(live.body.total.money.cny), 'member attribution must reconstruct the Team total')
+
+  const leadView = await request(h, VIEW, 'session=tree-lead')
+  assert.equal(leadView.status, 200)
+  assert.equal(leadView.body.scope, 'team', 'a root with a cataloged child is a Team on 0.2.2')
+  assert.equal(leadView.body.total.attempts, 6)
+
+  // Only the live `subagents.rootOf` can place this child: its header has no
+  // parent, so a host that cannot read the 0.2.2 lookup reports its own tree.
+  const orphan = await request(h, VIEW, 'session=tree-orphan-mate')
+  assert.equal(orphan.status, 200)
+  assert.equal(orphan.body.scope, 'team', 'the live root lookup must place a child with no header parent')
+  assert.equal(orphan.body.rootSessionId, 'tree-lead')
+
+  h.failRootLookup()
+  assert.equal((await request(h, VIEW, 'session=tree-mate-a')).status, 200, 'a broken root lookup must never surface as 503')
+})
+
+test('a DSH 0.2.2 root without a cataloged child keeps the tree scope and still refuses scope=team', async () => {
+  const h = harness({ team: 'subagent-tree' })
+  h.addSession('tree-lonely', { events: [messageEvent(0, PEAK, 'deepseek-flash', REAL_USAGE)] })
+  h.agents.set('tree-lonely', { id: 'tree-lonely' })
+
+  const auto = await request(h, VIEW, 'session=tree-lonely')
+  assert.equal(auto.status, 200)
+  assert.equal(auto.body.scope, 'tree', 'a Team of one is not a Team')
+
+  const refused = await request(h, VIEW, 'session=tree-lonely&scope=team')
+  assert.equal(refused.status, 400)
+  assert.equal(refused.body.code, 'TEAM_UNAVAILABLE')
+})
+
+test('a DSH 0.2.2 delegation tree outside Team mode is not relabelled as a Team', async () => {
+  const h = harness({ team: 'subagent-tree' })
+  h.addSession('plain-lead', { events: [messageEvent(0, PEAK, 'deepseek-flash', REAL_USAGE)] })
+  h.addSession('plain-child', { parentSession: 'plain-lead', origin: 'subagent', events: [messageEvent(0, PEAK, 'deepseek-flash', REAL_USAGE)] })
+  h.append('plain-lead', catalogEvent(1, 'plain-child'))
+  h.agents.set('plain-lead', { id: 'plain-lead' })
+  h.agents.set('plain-child', { id: 'plain-child' })
+  h.subagentRoots.set('plain-child', 'plain-lead')
+
+  const auto = await request(h, VIEW, 'session=plain-lead')
+  assert.equal(auto.status, 200)
+  assert.equal(auto.body.scope, 'tree', 'a subagent tree without Team mode is still a tree')
+
+  const child = await request(h, VIEW, 'session=plain-child')
+  assert.equal(child.status, 200)
+  assert.equal(child.body.scope, 'tree')
+  assert.equal(child.body.rootSessionId, 'plain-child', 'auto must not borrow an unverified Team root')
+
+  const refused = await request(h, VIEW, 'session=plain-lead&scope=team')
+  assert.equal(refused.status, 400)
+  assert.equal(refused.body.code, 'TEAM_UNAVAILABLE')
+})
+
+test('a throwing root lookup degrades to the session tree instead of failing the view', async () => {
+  const queries = new CostQueries({
+    membershipRoot() { throw new Error('root lookup exploded') },
+    async read(id) {
+      return { header: { id: id as SessionId }, ledger: ledgerFor(1), catalog: [], team: undefined }
+    },
+  }, 'auto')
+  const view = await queries.view({ sessionId: 'solo', scope: 'auto' })
+  assert.equal(view.scope, 'tree')
+  assert.equal(view.rootSessionId, 'solo')
+  assert.equal(view.coverage.status, 'complete', 'a missing optimization is not a coverage gap')
 })
 
 /* ------------------------------------------------------------------ *
@@ -1316,6 +1472,17 @@ test('the public error taxonomy never echoes internal failure detail', () => {
   const aborted = publicError(new DOMException('x', 'AbortError'))
   assert.equal(aborted.status, 503)
   assert.equal(aborted.body.code, 'QUERY_CANCELLED')
+  // The engine reports its own cancellation with a coded error, not a DOMException.
+  const engineAborted: any = new Error('session observation was aborted')
+  engineAborted.code = 'SESSION_QUERY_ABORTED'
+  assert.equal(publicError(engineAborted).body.code, 'QUERY_CANCELLED')
+  // A log the engine cannot replay is a data problem, not a transient outage.
+  const corrupt: any = new Error('failed to project session "x": boom')
+  corrupt.code = 'SESSION_QUERY_CORRUPT_SESSION'
+  const unreadable = publicError(corrupt)
+  assert.equal(unreadable.status, 422)
+  assert.equal(unreadable.body.code, 'SESSION_UNREADABLE')
+  assert.equal(unreadable.body.message.includes('boom'), false, 'the cause must never reach the client')
   const leaking: any = new Error("EACCES: permission denied, open 'C:\\Users\\nirvana\\.dsh\\cost.db'")
   leaking.code = 'EACCES'
   const mapped = publicError(leaking)

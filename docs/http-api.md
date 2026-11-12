@@ -69,7 +69,8 @@ A malformed session id or an extra key changes nothing.
 | `404` | An unknown session. |
 | `403` | A cross-site fetch; a gate request whose `sec-fetch-site` is outside `same-origin`/`none`; a gate `POST` whose `Origin` does not match the request's `Host`. |
 | `415` | A gate `POST` whose body is not `application/json`. |
-| `503` | A read that outlives its 8-second budget. |
+| `503` | A read that outlives its 8-second budget, is cancelled, or fails transiently (`SESSION_UNAVAILABLE`, `QUERY_CANCELLED`). |
+| `422` | A session log that cannot be replayed because its stored data is corrupt (`SESSION_UNREADABLE`). |
 
 Error bodies are JSON objects with `ok: false`, a `code` and a `message`; no
 response ever carries a local path.

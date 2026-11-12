@@ -33,6 +33,20 @@ interface SessionLookup { get(id: SessionId): SessionLineage | undefined }
 interface AgentLineage { readonly session: SessionLineage }
 interface AgentLookup { get(id: SessionId): AgentLineage | undefined }
 /**
+ * The root lookup DSH 0.2.2 introduced on the subagent service. Read
+ * structurally and optionally, because the plugin still loads — and must keep
+ * metering cost — on a 0.2.0 composition whose subagent service has no
+ * `rootOf`.
+ */
+interface SubagentRootLookup { rootOf(caller: unknown): { readonly id: SessionId } | undefined }
+/**
+ * The membership lookup of the 0.2.0 experimental Agent Team service, removed
+ * in 0.2.2 when Teams became subagent trees. Kept as a structural fallback so
+ * one build serves both compositions; the current DSH service has no such
+ * method, and calling it blindly used to throw a 503 for every live session.
+ */
+interface TeamMembershipLookup { tryMembership(agent: unknown): { readonly root: { readonly id: SessionId } } | undefined }
+/**
  * The projection registry and the observation reader are the whole purpose of
  * this plugin. `webServer`, `tools` and `commands` are used when the composition
  * has them, so a read-only or tool-less composition still meters correctly.
@@ -140,10 +154,23 @@ export function apply(ctx: Context, rawConfig: PluginConfig = {}): void {
       } finally { observation[Symbol.dispose]() }
     },
     membershipRoot(id) {
-      const agents = ctx.get('agents'), teams = ctx.get('agentTeams')
-      const agent = agents?.get(id as SessionId)
-      if (!agent || !teams) return undefined
-      return teams.tryMembership(agent)?.root.id
+      // Scope discovery must never throw: an unavailable root lookup just means
+      // "this session is its own root", which still produces a correct tree view.
+      try {
+        const agent = (ctx.get('agents') as unknown as AgentLookup | undefined)?.get(id as SessionId)
+        if (agent === undefined) return undefined
+        // DSH 0.2.2: a Team is the subagent tree of its live root, and the
+        // subagent service owns that lookup. Read it structurally so the same
+        // build also runs on 0.2.0, where the method is absent.
+        const subagents = ctx.get('subagents') as unknown as SubagentRootLookup | undefined
+        if (typeof subagents?.rootOf === 'function') {
+          const root = subagents.rootOf(agent)
+          return root === undefined ? undefined : String(root.id)
+        }
+        // DSH 0.2.0 experimental Teams: the durable roster owned the root.
+        const teams = ctx.get('agentTeams') as unknown as TeamMembershipLookup | undefined
+        return typeof teams?.tryMembership === 'function' ? teams.tryMembership(agent)?.root.id : undefined
+      } catch { return undefined }
     },
   }, config.defaultScope ?? 'auto')
   ctx.effect(() => () => queries.dispose(), 'api-cost query lifetime')

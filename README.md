@@ -27,14 +27,14 @@
 - **避开高峰** —— 开关打开且当前是高峰时，本会话及其委派子会话的模型请求会被暂缓，等到谷时原样发出：最多省一半，而模型全程无感。
 - **结算语义正确** —— 投影优先：每个 `assistant/message` 计一次，按其自身结算时刻定价；fork 继承的前缀不计入子会话；历史会话恢复时从持久日志折叠，不从 ¥0 起算，也不会翻倍。
 - **归属清楚** —— `self` / `tree` / `team` 三种范围；团队名单逐人列出金额，Lead 标 ★；`others` 永远是 `total − own`，fork 不会被重复计入。
-- **轻** —— 没有重放框架、没有数据库、没有自有轮询循环：客户端约 **13.7 KiB gzip**，宿主约 **15.0 KiB gzip**。
+- **轻** —— 没有重放框架、没有数据库、没有自有轮询循环：客户端约 **13.7 KiB gzip**，宿主约 **15.3 KiB gzip**。
 - **诚实** —— 是估算而不是账单；价目表外的模型标为未定价，而不是猜一个价；覆盖缺口用文字如实写出。
 
 **为什么不是又一个用量面板。** 用量面板通常在插件侧重放日志、自己攒一份账本；`dsh-api-cost` 注册的是宿主持有的 `apiCost` 会话投影——事件驱动、每会话水位、持久化检查点都由 Harness 负责，客户端通过框架自带的 `useProjection` 座位读取同一份投影。差别是结构性的：历史不用手动补、重启不会翻倍；`tree` / `team` 归集直接复用持久的委派目录与团队名单，fork 继承的前缀被明确排除，看某个分支时不会把祖先重复计一遍。
 
 ## 安装
 
-需要 DeepSeek Harness **0.2.0-rc.2+**，且装配了 `sessionProjections`、`sessionProjectionCache`、`sessionQuery` 三项能力（自带的 `web` 与 `desktop` profile 都有）。仓库自带预构建的 `dist/`，**安装不需要编译器**；Node.js 24 只在开发时需要。
+需要 DeepSeek Harness **0.2.0-rc.2+**（已在 **0.2.2-rc.2** 上验证），且装配了 `sessionProjections`、`sessionProjectionCache`、`sessionQuery` 三项能力（自带的 `web` 与 `desktop` profile 都有）。仓库自带预构建的 `dist/`，**安装不需要编译器**；Node.js 24 只在开发时需要。
 
 ```sh
 # Web / CLI profile —— 从 GitHub 仓库安装（现在就能用）
